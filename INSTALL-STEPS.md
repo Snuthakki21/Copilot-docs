@@ -53,7 +53,9 @@ Files to copy:
 2. In the chat panel, click the **"+"** (New Chat) button at the top to start a **fresh thread**.
 3. Pick the **Agent mode** dropdown (usually labeled "Ask" / "Edit" / "Agent") and select **Agent**.
    - Agent mode lets Copilot read files, run commands, and edit across the repo. You need this.
-4. Confirm the model is **Claude (Sonnet 4 or higher)** or **GPT-4.1** in the model picker — do not run this on a smaller model.
+4. In the model picker at the bottom of the chat panel, select **GPT-4.1**. Do NOT use GPT-4o, Haiku, or GPT-5 nano — those will collapse on this prompt's length.
+
+> **GPT-4.1 note:** GPT-4.1 is stricter about literal instructions and may hand back early or occasionally skip the TEST-RUN step. The continuation prompts in STEP 6 and the troubleshooting table at the end of this file are built to catch these failure modes. Keep them open in a second window.
 
 ---
 
@@ -74,8 +76,28 @@ Copilot will now:
 ## WHILE IT RUNS
 
 - Copilot will ask permission before running terminal commands or editing files — click **Allow** each time, or tick **"Always allow for this workspace"** once if you trust it to run the full loop unattended.
-- If it stalls or loses context, paste this follow-up: **"Continue from where you left off. Stay under the 8-step protocol. Evidence or nothing."**
-- If you want to stop and ask it to report progress so far: **"Emit the Output Contract for all completed rows. Do not skip the evidence column."**
+- If it stalls or loses context, use one of the STEP 6 continuation prompts below.
+
+---
+
+## STEP 6 — GPT-4.1 Continuation Prompts (copy these into a sticky note)
+
+GPT-4.1 has five predictable failure modes. Here are the one-line fixes — paste the matching prompt back into the same chat thread:
+
+1. **Early stop / waiting for user:**
+   > `Continue. Do not yield until all 35 rows + 21 gates + Output Contract are done. You are an autonomous agent.`
+
+2. **Claimed `[PASS]` without showing the pytest output:**
+   > `Show the exact pytest command and the green output line for test_req_<n>. If you cannot paste it, change the row to [FAIL].`
+
+3. **Describing instead of executing:**
+   > `Stop describing. Execute. Use your file-edit and terminal tools now.`
+
+4. **Hallucinated file contents (it described a file it never opened):**
+   > `You just described that file without reading it. Call the file-read tool on <path> and paste the first 30 lines. Then redo the step.`
+
+5. **Lost context mid-run:**
+   > `Resume from row <n>. Re-read .github/copilot-instructions.md first. Then continue under the 8-step protocol.`
 
 ---
 
@@ -109,7 +131,25 @@ If any sanity check fails, feed the exact failing output back to Copilot and it 
 
 ---
 
+## TROUBLESHOOTING — GPT-4.1-Specific Failure Modes
+
+Keep this table visible while the run executes. When a symptom appears, paste the matching response back into chat.
+
+| Symptom | Paste this back |
+|---|---|
+| Says "I would now do X" | `Stop describing. Execute X now with the tool.` |
+| Claims `[PASS]`, no pytest output visible | `Paste the pytest command and the green line. Without it, mark the row [FAIL].` |
+| Stops at row 10/20/30 with a summary | `That's not the Output Contract. Continue from row <n+1>. All 35 rows are required.` |
+| Guessed at xlsx contents | `Open Synthetic Data Generator Rules Inputs.xlsx with the file-read tool. Paste the tab list and headers. Then redo.` |
+| Wrote instructions for the user instead of code | `You are the agent. Do it yourself. Use write/edit tools.` |
+| Skipped TEST-FIRST step (wrote production code first) | `You wrote production code before a failing test. Revert that edit. Write the failing test first, confirm RED, then re-apply.` |
+| Produced a final report with prose / emojis | `The Output Contract forbids prose, emojis, and congratulations. Re-emit the report with only the required lines.` |
+| Claims the coverage threshold is 65% without citing the PDF | `Open AI Power Synthetic Data Generation.pdf, search for "coverage" / "threshold". If silent, log the fallback per N4.` |
+
+---
+
 ## THAT'S IT
 
 - **File 1** (`copilot-instructions.md`) → goes into `.github\` folder. Never changes.
 - **File 2** (`remediation-prompt.md`) → paste into chat to trigger a run. Re-paste any time you want to re-run remediation (e.g., after a merge).
+- **STEP 6 + Troubleshooting** → keep visible while GPT-4.1 runs so you can nudge it back on track in one paste.

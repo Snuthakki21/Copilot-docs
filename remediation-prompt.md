@@ -1,27 +1,39 @@
-# Synthetic Data Generator Remediation Prompt
+# Synthetic Data Generator Remediation Prompt (GPT-4.1 tuned)
 
-**Paste this entire file as a single message into GitHub Copilot Chat after `.github/copilot-instructions.md` is in place.**
-
----
-
-## TASK
-
-Remediate the synthetic data generator in the current working directory to production-ready state per `.github/copilot-instructions.md`. Apply the 8-step protocol below to every non-trivial action. A claim or edit without the protocol is a hallucination and must be rejected by you. A PASS without a cited test id is a hallucination.
+**Paste this entire file as a single message into GitHub Copilot Chat after `.github/copilot-instructions.md` is in place. Model MUST be GPT-4.1.**
 
 ---
 
-## REASONING PROTOCOL — OBSERVE → CITE → VERIFY → REASON → TEST-FIRST → ACT → TEST-RUN → VERIFY
+## TASK (autonomous run — DO NOT yield until Output Contract is emitted)
 
-Think in this exact 8-part structure (one short line per part where possible):
+You are an autonomous remediation agent. Your turn ends ONLY when every row #1–#35 has `PASS|FIXED|FAIL` with a cited test id AND every GATE 1–21 has run AND the final Output Contract is emitted. Nothing short of that counts as done.
 
-1. **OBSERVE** — what I am about to do.
-2. **CITE** — source anchor as (file, tab_or_page, row_or_line). If none, emit `SOURCE_MISSING: <what>` and STOP that item.
-3. **VERIFY** — read the cited source now (no memory). Quote the supporting text/headers/cells. If it does not actually say what I thought, correct or abort.
-4. **REASON** — premise → premise → conclusion, deriving the concrete change.
-5. **TEST-FIRST** — write a failing test that, when green, proves the change. Id: `test_req_<n>_*`, `test_nfr_<n>_*`, or `test_bug_<short>_*`. Assertions draw on values from sources 1–3.
-6. **ACT** — perform exactly the edit implied. No scope creep.
-7. **TEST-RUN** — run the new test plus the full suite. Capture exit code + failing tests. If new test still red, loop back to REASON (max 3 attempts; then FAIL the row).
-8. **VERIFY** — re-read the edited artifact + test report. Confirm the artifact matches intent AND the test id appears in the green set. If not, revert and retry.
+You have tools: read files, write files, run terminal commands. USE THEM. Every fact about the codebase, the xlsx, or the PDF MUST come from a fresh tool call in THIS session.
+
+**Forbidden phrases in your output** (if you catch yourself writing one, STOP and do the action instead):
+
+- "I would…" → do it instead.
+- "The user should…" → you do it.
+- "I'll continue when you…" → keep going now.
+- "Based on typical Flask apps…" → read the actual `app.py`.
+- "The rules file likely contains…" → open the xlsx with the file-read tool.
+- "Assuming the coverage threshold is 65%…" → open the PDF; fallback to 65% ONLY after confirming silence, and log the fallback.
+- `[PASS]` without a green `pytest` line executed in THIS session → write `[FAIL]` instead.
+
+Follow the 8-step protocol below for every non-trivial action. Any claim without the protocol is a hallucination and MUST be rejected by you. A PASS without a cited test id is a hallucination.
+
+---
+
+## 8-STEP PROTOCOL — EXECUTE IN ORDER, NO SKIPS
+
+1. **OBSERVE** — State in one sentence what you are about to do.
+2. **CITE** — State the source anchor `(file, tab_or_page, row_or_line)`. If the anchor does not exist in sources 1–3, you MUST emit `SOURCE_MISSING: <what>` and SKIP this item. DO NOT invent an anchor.
+3. **VERIFY** — You MUST call the file-read tool NOW and quote the supporting text/headers/cells. DO NOT recite from memory. If the source does not say what you expected, correct or abort.
+4. **REASON** — State premise → premise → conclusion in 2–3 short lines.
+5. **TEST-FIRST** — You MUST write a failing test BEFORE editing production code. Id: `test_req_<n>_*`, `test_nfr_<n>_*`, or `test_bug_<short>_*`. Run it; confirm RED.
+6. **ACT** — Perform the edit. No scope creep. No "while I'm here" refactoring of unrelated code.
+7. **TEST-RUN** — You MUST execute `pytest` (or equivalent) for the new test plus the full suite. Paste the exit code and the test id line from the output. If RED, loop to REASON (max 3 attempts; then FAIL the row).
+8. **VERIFY** — Re-read the edited artifact via the file-read tool AND confirm the test id appears in the green output. If either fails, revert and retry. DO NOT proceed to the next row until this step returns true.
 
 ---
 
@@ -57,6 +69,17 @@ Build fixtures and stubs:
 - Provide a deterministic clock + seeded RNG fixture.
 - Provide a PII fixture (small held-out "real-data" CSV) for NFR-N4 data-privacy testing.
 - Provide a fault-injection helper for Tachyon stubs (500 / timeout / connection refused) for NFR reliability tests.
+
+---
+
+## NON-NEGOTIABLE EXECUTION RULES (read before starting PHASE 3A)
+
+- You WILL iterate all 35 rows. You WILL NOT stop at row 10 and summarize. You WILL NOT stop at row 20 and ask if you should continue.
+- You WILL run all 21 gates after the rows.
+- You WILL emit the Output Contract as the final message.
+- Every 5 rows, you MAY emit a single progress marker line: `PROGRESS: row <n>/35`. This is NOT the final report. Continue immediately.
+- If a row consumes 3 attempts without a green test, mark `[FAIL] #<n> — <file:line> — <next action>` and move to the next row. DO NOT stall.
+- If a tool call returns an error, fix the call and retry. DO NOT fall back to guessing.
 
 ---
 
@@ -191,11 +214,13 @@ Emit exactly the OUTPUT CONTRACT from `.github/copilot-instructions.md`. Nothing
 
 ---
 
-## FINAL REMINDER
+## CLOSING MANDATE — RE-READ BEFORE EMITTING ANYTHING
 
-- Functional PASS requires `test_req_<n>_*` green.
-- NFR PASS requires `test_nfr_<n>_*` green.
-- Bug REGRESSION-GREEN requires `test_bug_<short>_*` green.
-- No green test → not done. Evidence or nothing.
+- Functional `[PASS]` requires a green `test_req_<n>_*` line from a `pytest` run executed in THIS session.
+- NFR `[PASS]` requires a green `test_nfr_<n>_*` line from a `pytest` run executed in THIS session.
+- Bug `[REGRESSION-GREEN]` requires a green `test_bug_<short>_*` line from a `pytest` run executed in THIS session.
+- No green line → the row is `[FAIL]`. There is no third option.
+- No final report before all 35 rows + 21 gates are attempted. Progress markers are NOT the final report.
+- The final report follows the Output Contract from `.github/copilot-instructions.md` exactly. No prose, no preamble, no congratulations, no emojis, no "let me know if…".
 
-If you are about to claim a row PASS without a green test id — **STOP**. Either write the test and run it green, or mark FAIL. Evidence or nothing.
+If you are about to claim a row `[PASS]` without a green test id from THIS session — **STOP**. Either write the test and run it green, or mark `[FAIL]`. Evidence or nothing.
