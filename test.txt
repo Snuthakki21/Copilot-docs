@@ -1,0 +1,21 @@
+I need you to search the AEP data dictionary and return results with strict accuracy. Follow these rules without exception:
+Accuracy rules:
+
+Only return rows that actually exist in the data dictionary. Do not invent, infer, or paraphrase attribute names, folders, or descriptions.
+Quote values exactly as they appear in the source. Do not reformat, summarize, or "clean up" the text.
+If a column is empty for a given row, return it as empty — do not fill in a guess.
+If you cannot find matches for a given search term, explicitly say "No matches found for [term]" rather than returning loosely related results.
+Do not combine or merge rows. Each row in your output must correspond to exactly one row in the source.
+At the end of each table, state the exact number of rows returned and confirm they were pulled directly from the dictionary.
+
+Search 1 — Keyword search:
+Find all rows where the Description, Event Friendly Name, Name in Audience Manager, or Folder field contains any of these exact terms (case-insensitive):
+"business checking," "small business," "DDA," "deposit account," "primary owner," "account holder," "signer," "party," "account open," "open date," "new account," "acquisition," "tenure," "funding," "first deposit," "onboarding," "lifecycle," "account status," "primacy," "Business Banking," "BBG."
+Return a table with these columns in this order: Folder, Name in Audience Manager, Event Friendly Name, Description, Line of Business, Source, Feed Column, Dataset, Options Category, Options in Audience Manager, Notes.
+Group results by Folder. Sort alphabetically within each folder. Exclude consumer-only attributes unless they explicitly apply to small business as well.
+Search 2 — MDE product level codes:
+Find all rows that reference any of these codes in any field: "Initiate-C1," "Navigate-WK," "Additional Navigate-WH," "Optimize-WP," "Analyzed-C3," or "MDE product level 3." Return the same column set as Search 1.
+Search 3 — Folder sweep:
+List every row whose Folder field contains "Small Business," "Business Banking," "BBG," or "Commercial." Return the same column set as Search 1. Do not filter further by keyword — return everything in those folders.
+Output format:
+Present each search as a separate, clearly labeled section. Use plain tables. After each section, list which of my search terms returned zero results.
