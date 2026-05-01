@@ -1,7 +1,157 @@
-Option 3: Keep all rows, but add two flag columns:
+You are helping me prep for a working session with Mike Copeman (AMX) on the
+Business Checking Onboarding email campaign in Adobe Audience Manager. I am
+the new audience builder taking over from Patrick. The attached AEP data
+dictionary is the authoritative list of attributes available in Audience
+Manager — please ground your answers in it and cite the exact attribute
+names as they appear in the dictionary. The attached audience build
+screenshots show the current working build (NEW_BBONBH2205_BASE_NON_EC_CC,
+modified base, scrub ID 1500055) — use those as the literal starting point
+for the test audiences I'm asking you to design.
 
-Business_Relevant — Yes/No/Maybe. Yes = LOB-Product contains "Small Business" OR "Business Banking" OR "BBG" OR "Commercial," OR Folder contains those terms, OR Description/Name explicitly references business ownership, business checking, business deposit, or small business segmentation. No = LOB-Product is explicitly Consumer/Personal only with no business reference anywhere. Maybe = ambiguous, applies to General/Multiple LOBs, or unclear from available fields.
-Business_Match_Reason — short text explaining which field triggered the Yes or Maybe (e.g., "Folder: Small Business," "LOB: Small Business - General/Multiple," "Description references primary owner of business checking").
+CONTEXT YOU NEED
 
-Apply this to all three searches, not just Search 1, so they're consistent. Sort each output with Yes rows first, Maybe second, No last. Confirm row counts per flag value at the end.
-Do not drop, merge, or paraphrase any rows. Keep all original columns intact and add the two flag columns at the end.
+The campaign targets primary owners of business checking accounts opened
+in the last 60 days. The current base audience is BBONBH2205_BASE_NON_EC_CC;
+the working version is NEW_BBONBH2205_BASE_NON_EC_CC (modified base, scrub
+ID 1500055, with explicit age-by-state minor logic that is being removed in
+a Modified2 version because the consent engine now handles minors itself).
+The existing build uses the business checking open primary indicator
+(bus_chk_opn_prim_ind = 1) and currently does NOT split consumer vs. business
+ECNs at the start of the build.
+
+A business checking account can be tied to two ECNs: a business ECN (the
+entity, often with no email on file because Wells Fargo doesn't require
+email at business signup) and a consumer ECN (the human owner, who usually
+does have an email). The current hypothesis is that the audience is passing
+the business ECN paired with the consumer's email to the consent engine,
+and the consent engine is rejecting that pairing as invalid — which would
+explain why ~30% of the audience is being dropped at the email scrub even
+though the emails themselves don't look bad.
+
+WHAT MIKE AND SARAH WANT TO TEST
+
+Sarah Waller (support ticket owner) proposed two validation tracks:
+  Track 1 — Pull the ~20K ECNs being dropped by the bad-email scrub and
+            examine their customer type code and emails. This requires a
+            "reverse audience" — records that pass pre-scrub but get
+            dropped post-scrub.
+  Track 2 — Add customer type code at the START of the build and split
+            into two test audiences (consumer ECNs only, business ECNs
+            only) to see how the scrub drop counts change. Big difference
+            between the two = ECN-type/email mismatch is real.
+
+Mike has separately said the FASTEST WIN is to confirm this is not a build
+issue before escalating to system-level changes between Audience Manager
+and the consent engine. He also wants to explore a third angle:
+  Track 3 — Whether we can target a CONSUMER ECN that recently became
+            primary owner of a business checking account, instead of
+            targeting the business ECN. This passes consumer ECN +
+            consumer email to the consent engine, which Darren
+            (consent-engine SME) believes would resolve the rejection.
+
+We follow these rules of thumb:
+- Prefer CAP-sourced attributes over Hemi-sourced (Hemi is being decommissioned).
+- Don't duplicate logic that already lives in the consent engine.
+- Build for execution, not waterfall prettiness.
+- Don't add attributes that aren't in the dictionary — flag gaps instead.
+
+WHAT I NEED FROM YOU
+
+Produce a prep document with two parts.
+
+PART A — ATTRIBUTE INVENTORY
+
+For every attribute you cite anywhere in this document, give: the exact
+attribute name as it appears in the dictionary, the source system (CAP /
+Hemi / other), the data type or value domain if visible, and a one-line
+description in your own words. If you find multiple candidates for the
+same concept, list all of them and recommend one with a one-sentence
+justification. If something is not in the dictionary, say so plainly —
+do not invent.
+
+Cover these five attribute areas:
+
+  1. Customer type code — the canonical attribute, its possible values,
+     near-duplicates that could trip us up. Recommend one.
+
+  2. Email and ECN-to-email linkage — every attribute related to (a) a
+     customer's email address (business vs. individual/personal), (b)
+     email validity / scrub-related flags, (c) the linkage between an
+     ECN and its email(s), (d) any attribute that resolves "the consumer
+     ECN of the primary owner of a business account."
+
+  3. Trust indicators — Sarah's ticket says there are FOUR. Find all of
+     them (or more if more exist). Quote definitions from the dictionary
+     where available. Explain what population each one drops.
+
+  4. Closed-account / account-activity attributes — Mike flagged these
+     gaps in the current build. Find the canonical versions.
+
+  5. Other dictionary attributes that look directly relevant to a
+     "recently-opened business checking primary owner" audience that are
+     NOT currently in the build shown in the screenshots.
+
+PART B — TEST AUDIENCE BUILDS
+
+Design FIVE test audiences. For each, give the build as an ordered list
+of rules using EXACT dictionary attribute names, with the operator and
+value for each rule. Where the rule is identical to the current
+NEW_BBONBH2205_BASE_NON_EC_CC build (per the screenshots), say
+"same as current base" and don't restate. Only spell out the rules that
+DIFFER from the current base.
+
+For each test audience also give:
+  - A one-line statement of what hypothesis it's testing.
+  - The expected directional outcome if the hypothesis is correct
+    (e.g., "drop at email_scrub_id should fall from ~30% to under 5%").
+  - What it does NOT test (so we don't over-claim from one build).
+  - Any risk in the build (e.g., circular dependency, attribute that
+    might not populate for new accounts, scrub-engine interaction).
+
+The five test audiences:
+
+  Build 1 — REVERSE AUDIENCE FOR SARAH'S TRACK 1
+            Records that qualify pre-email-scrub but are dropped at the
+            email scrub. Output: the ~20K ECNs being dropped, so Sarah
+            can pull their emails on the consent-engine side.
+
+  Build 2 — CONSUMER ECNs ONLY (Sarah's Track 2, leg A)
+            Modified base + customer type code = consumer applied at the
+            START of the build.
+
+  Build 3 — BUSINESS ECNs ONLY (Sarah's Track 2, leg B)
+            Modified base + customer type code = business applied at the
+            START of the build.
+
+  Build 4 — CONSUMER-ECN-AS-PRIMARY-OWNER (Mike's Track 3 / Darren's fix)
+            Target the consumer ECN of a person who recently became
+            primary owner of a business checking account, rather than
+            targeting the business ECN. Spell out the linkage attributes
+            you'd use and flag if no clean dictionary attribute supports
+            this — that itself is an important finding.
+
+  Build 5 — ATTRIBUTE-GAP COMPARISON
+            Modified base + the closed-account indicator and account-
+            activity codes Mike flagged as missing. The point is to
+            quantify whether adding these tightens the audience in a way
+            Merrilee should know about before approval.
+
+For each build, also state which TWO existing waterfalls the side-by-side
+comparison should be against (current production base, modified base, or
+each other) so that when Lalithya kicks off the runs we know what we're
+comparing to.
+
+PART C — BOTTOM LINE FOR THE MEETING
+
+A 5–7 bullet summary I can read out at the start of the call with Mike:
+what attributes I confirmed exist, which builds I'm proposing, where the
+dictionary has a real gap that blocks one of the test plans, and which
+build I think we should kick off FIRST given the 24-hour wait for
+waterfalls.
+
+FORMAT
+
+Use clear section headers matching the structure above. Attribute names
+in `code formatting`. Be precise. If the dictionary is ambiguous, say so.
+If a build can't be cleanly designed because the dictionary is missing
+an attribute, say that too — don't paper over the gap.
