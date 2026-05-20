@@ -1,0 +1,53 @@
+Meeting follow-up for Lalithya, Darren, and Mike:
+
+The team needs to continue investigating the audience drop-off issue in Adobe Audience Manager for the business checking email campaign.
+
+Objective:
+Determine why a large number of eligible records are dropping from the audience, especially business ECNs without email addresses, and identify whether those records can be recovered by finding an associated owner or related party with a valid email address.
+
+What needs to be done:
+
+1. Lalithya should create or modify a draft version of the production audience.
+   - Do not change the production audience yet.
+   - Use the current production audience as the base.
+   - Build a test structure that separates the logic into clearer audience paths.
+
+2. Lalithya should test splitting the audience into primary and non-primary populations.
+   - First path: primary checking account relationships with valid email addresses.
+   - Second path: non-primary or secondary relationships that may be valid contacts.
+   - Use the primary checking indicator to separate these groups.
+
+3. Lalithya should investigate relationship category codes.
+   - Review which codes are appropriate to include.
+   - Potentially test codes such as core, authorized signer, and other.
+   - Exclude inappropriate relationship types such as trust, power of attorney, minors, or other non-target relationship types.
+   - Investigate why some tested relationship categories are returning zero estimated profiles.
+
+4. Lalithya should try using a sub-audience / convert-to-rules approach if needed.
+   - Strip the top logic into a sub-audience.
+   - Save it as a draft.
+   - Bring it back into the main audience.
+   - Use convert-to-rules or unwrap rules to create an OR structure if Adobe Audience Manager does not allow the logic to be built cleanly.
+
+5. Darren and Mike should review the draft structure with Lalithya.
+   - Confirm whether the new structure gives clearer waterfall visibility.
+   - Confirm whether the build separates business ECNs, primary contacts, and secondary/owner contacts in a useful way.
+   - Determine whether the structure creates duplicate-contact risk.
+
+6. The team needs to determine whether Adobe Audience Manager can connect business ECNs without email addresses to associated owner/person ECNs with valid email addresses.
+   - This may require help from AMX or Adobe.
+   - The key question is whether Audience Manager can support cross-ECN logic or an audience/entity switch from business ECN to owner/person ECN.
+
+7. The team needs to confirm Salesforce deduplication behavior.
+   - Determine whether Salesforce still deduplicates when the same email address appears more than once.
+   - Confirm whether deduplication happens when the same creative ID is sent to the same email address.
+   - Confirm what happens if the business ECN and owner/person ECN have different email addresses.
+
+8. The team should prepare a clear explanation for Merrily.
+   - Explain how many records are dropping because no email address exists.
+   - Explain whether any of those records can be recovered through owner or related-party emails.
+   - Explain what limitations exist in Adobe Audience Manager.
+   - Provide next steps for increasing reachable campaign volume.
+
+Desired outcome:
+A tested draft audience build that provides clearer waterfall reporting, identifies recoverable records where possible, and gives the team a defensible explanation of why records are dropping and what can be done to reach more eligible business checking customers.
