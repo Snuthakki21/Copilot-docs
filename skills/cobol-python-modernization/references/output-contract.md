@@ -24,6 +24,10 @@ Do not create shared business-logic modules across jobs. Shared tooling belongs 
 
 The artifacts document and reproduce **observed legacy behavior**, even when that behavior is suspicious or appears incorrect. The migration must not change source logic to match a preferred interpretation, comment, business expectation, or modern best practice. Suspicious behavior is documented as an observation; it is not repaired in the migration unless source evidence itself proves the executable behavior differs.
 
+## Evidence-only accuracy rule
+
+Every material factual claim in lineage and validation must be supported by concrete evidence: exact source location/excerpt, Python location/excerpt, test/fixture result, file/DB reconciliation, or scheduler/DDL evidence. Never convert a plausible inference into a fact. If evidence is insufficient, write `UNKNOWN — UNVERIFIED`, add the item to `unsupported_claims` or `unresolved`, and block 100% until evidence resolves it.
+
 ## `lineage.md`
 
 Required order: executive summary; source inventory; exact source commit/workbook hash; JCL step flow; program-by-program explanation; input/output datasets; DB2/table interactions; rule catalog; legacy quirks/suspicious behavior; error/restart behavior; DB2→SQLite/Oracle notes; source-to-target trace table; unresolved items. Each rule has a stable ID and source location.
@@ -85,11 +89,12 @@ Machine gate. Minimum shape:
   "coverage_percent": 92.4,
   "security_findings": [],
   "defects": [],
-  "unresolved": []
+  "unresolved": [],
+  "unsupported_claims": []
 }
 ```
 
-`defects` means defects introduced by the migration, not known/suspected defects faithfully reproduced from source.
+`defects` means defects introduced by the migration, not known/suspected defects faithfully reproduced from source. `unsupported_claims` contains any material validation/lineage assertion for which the reviewer cannot point to sufficient evidence. A non-empty `unsupported_claims` list blocks 100%.
 
 ## `validation_report.md`
 
@@ -97,13 +102,13 @@ This is the primary human-readable parity artifact. It must be understandable by
 
 ### Required top-level structure
 
-1. **Executive Validation Summary** — PASS/FAIL, final score, job purpose, source commit/workbook hash, number of rules checked, passed rules, failed rules, unresolved items, coverage, and one-paragraph conclusion.
+1. **Executive Validation Summary** — PASS/FAIL, final score, job purpose, source commit/workbook hash, number of rules checked, passed rules, failed rules, unresolved/unverified items, coverage, and one-paragraph conclusion.
 2. **Rule Parity Matrix** — one row for every stable Rule ID discovered from JCL/COBOL/DB2/control-card behavior.
 3. **Detailed Discrepancies** — one subsection for every failed rule; omit only when every rule passes.
 4. **Preserved Legacy Quirks** — suspicious or apparently incorrect source behavior that Python mirrors exactly. These are not migration defects.
 5. **File / Database / Scheduler Reconciliation** — input/output counts, row/file comparisons, DB state, ordering, return codes, restart/rerun behavior, DDL/JIL checks.
 6. **Test / Coverage / Security Results** — tests, ≥80% coverage, adversarial review and security/defect results.
-7. **Final Verdict** — 100% only when no behaviorally material source/Python mismatch remains; otherwise 0% with blockers.
+7. **Final Verdict** — 100% only when no behaviorally material source/Python mismatch, unresolved evidence gap, or unsupported factual claim remains; otherwise 0% with blockers.
 
 ### Rule Parity Matrix
 
@@ -120,12 +125,12 @@ For every rule, include all of these fields. Do not replace them with a generic 
 | **Python code evidence** | The smallest relevant Python excerpt or precise source reference needed to prove the implementation. |
 | **Python behavior in plain English** | What the Python actually does when executed. Do not merely restate the code syntax. |
 | **Validation evidence** | Test IDs, fixture/case, SQLite/file comparison or other evidence used. |
-| **Parity result** | `PASS` only when source and Python behavior are materially equivalent; otherwise `FAIL`. |
-| **Discrepancy** | `None` for PASS. For FAIL, a plain-English statement of exactly what behavior differs. |
-| **Root cause** | `N/A` for PASS. For FAIL, why the migration differs: missed branch, wrong predicate, datatype/precision issue, ordering, DB semantic difference, incorrect mapping, missing source artifact, etc. |
-| **Required remediation** | `None` for PASS. For FAIL, the specific change needed in Python/tests/DDL/JIL to restore source parity. The remediation must preserve the source behavior, even when the source behavior appears wrong. |
+| **Parity result** | `PASS` only when source and Python behavior are materially equivalent; `FAIL` for a proven mismatch; `UNVERIFIED` when evidence is insufficient. |
+| **Discrepancy** | `None` for PASS. For FAIL, a plain-English statement of exactly what behavior differs. For UNVERIFIED, state what cannot yet be proven. |
+| **Root cause** | `N/A` for PASS. For FAIL, state only an evidence-backed cause. If not proven, use `UNKNOWN — additional source tracing required`. |
+| **Required remediation** | `None` for PASS. For FAIL, the specific change needed in Python/tests/DDL/JIL to restore source parity. For UNVERIFIED, state the evidence needed before remediation can be prescribed safely. |
 
-A reviewer should be able to read one row and answer: **What did COBOL do? What does Python do? Are they the same? If not, exactly why not and what must be changed?**
+A reviewer should be able to read one row and answer: **What did COBOL do? What does Python do? Are they the same? If not, exactly why not and what must be changed? If we cannot prove the answer, is that uncertainty explicitly visible?**
 
 ### Detailed Discrepancies
 
@@ -151,7 +156,7 @@ Discrepancy:
 <exact behavioral difference>
 
 Why this discrepancy exists / Root cause:
-<evidence-backed cause; say UNKNOWN if not proven>
+<evidence-backed cause; UNKNOWN if not proven>
 
 Observed impact:
 <records, files, DB state, control flow, return codes, ordering, restart behavior, etc.>
@@ -162,11 +167,14 @@ Required remediation to restore parity:
 Validation required after remediation:
 <tests/reconciliation that must be rerun>
 
+Evidence supporting this conclusion:
+<source/Python/test/reconciliation references>
+
 Status:
 OPEN | RESOLVED AND REVALIDATED
 ```
 
-Never guess a root cause. If the evidence does not establish why the mismatch exists, write `UNKNOWN — additional source tracing required` and keep the job at 0%.
+Never guess a root cause, impact, or remediation. If evidence does not establish it, write `UNKNOWN — additional source tracing required`, add the unsupported point to `traceability.json.unsupported_claims` or `unresolved`, and keep the job at 0%.
 
 ### Preserved legacy quirks
 
@@ -174,4 +182,4 @@ Use the same source/plain-English/Python/plain-English comparison when useful, b
 
 The adversarial question is: **Does Python behave differently from source anywhere?** It is not: **Can the source logic be improved?** A faithfully reproduced source defect is parity. A source/Python difference is a migration defect.
 
-The score is `100%` only when `scripts/modernization_tools.py <job-folder>` exits 0 and no behaviorally material source/Python mismatch remains. Otherwise score `0%` and explain blockers; do not use subjective partial percentages.
+The score is `100%` only when `scripts/modernization_tools.py <job-folder>` exits 0 and no behaviorally material source/Python mismatch, unresolved evidence gap, or unsupported factual claim remains. Otherwise score `0%` and explain blockers; do not use subjective partial percentages.
