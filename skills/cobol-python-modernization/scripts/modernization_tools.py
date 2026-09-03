@@ -20,6 +20,10 @@ _REQUIRED_FILES = (
     "validation_report.md", "traceability.json", "tests/test_job.py",
 )
 _DOC_SECTIONS = ("Purpose:", "Inputs:", "Outputs:", "Side effects:", "Failure behavior:", "Rule IDs:")
+_REPORT_SECTIONS = (
+    "Executive Validation Summary", "Rule Parity Matrix", "Preserved Legacy Quirks",
+    "File / Database / Scheduler Reconciliation", "Test / Coverage / Security Results", "Final Verdict",
+)
 
 
 def _header_key(value: object) -> str:
@@ -95,6 +99,26 @@ def _python_documentation_errors(path: Path) -> list[str]:
     return errors
 
 
+def _validation_report_errors(path: Path, rules: list[object]) -> list[str]:
+    if not path.is_file():
+        return []
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        return [f"validation_report.md cannot be read: {exc}"]
+
+    errors = [f"validation report missing section: {section}" for section in _REPORT_SECTIONS if section not in text]
+    required_fields = (
+        "Source code evidence", "Source behavior in plain English", "Python code evidence",
+        "Python behavior in plain English", "Parity result", "Discrepancy", "Root cause", "Required remediation",
+    )
+    errors.extend(f"validation report missing parity field: {field}" for field in required_fields if field not in text)
+    for rule in rules:
+        if isinstance(rule, dict) and rule.get("id") and str(rule["id"]) not in text:
+            errors.append(f"validation report does not reference rule {rule['id']}")
+    return errors
+
+
 def validate_job_artifacts(job_dir: Path) -> dict[str, object]:
     errors: list[str] = []
     for rel in _REQUIRED_FILES:
@@ -119,6 +143,7 @@ def validate_job_artifacts(job_dir: Path) -> dict[str, object]:
     rules = manifest.get("rules", []) if isinstance(manifest, dict) else []
     if not isinstance(rules, list) or not rules:
         errors.append("traceability.json must contain at least one discovered source rule")
+        rules = []
     else:
         for idx, rule in enumerate(rules, start=1):
             if not isinstance(rule, dict):
@@ -132,11 +157,18 @@ def validate_job_artifacts(job_dir: Path) -> dict[str, object]:
             if not rule.get("tests"):
                 errors.append(f"rule {rule_id} has no validation test trace")
 
+    errors.extend(_validation_report_errors(job_dir / "validation_report.md", rules))
+
     coverage = manifest.get("coverage_percent", 0) if isinstance(manifest, dict) else 0
     if not isinstance(coverage, (int, float)) or coverage < 80:
         errors.append(f"Python coverage is below 80%: {coverage!r}")
 
-    for key, label in (("security_findings", "security findings"), ("defects", "defects"), ("unresolved", "unresolved source behavior")):
+    for key, label in (
+        ("security_findings", "security findings"),
+        ("defects", "defects"),
+        ("unresolved", "unresolved source behavior"),
+        ("unsupported_claims", "unsupported validation claims"),
+    ):
         value = manifest.get(key, []) if isinstance(manifest, dict) else []
         if value:
             errors.append(f"non-zero {label}: {len(value) if isinstance(value, list) else value}")
