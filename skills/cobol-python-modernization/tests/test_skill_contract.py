@@ -41,18 +41,14 @@ class SkillContractTests(unittest.TestCase):
         self.assertIn("do not change", text)
         self.assertIn("suspicious", text)
 
-    def test_validation_report_requires_side_by_side_plain_english_parity_matrix(self):
+    def test_validation_report_requires_side_by_side_plain_english_parity(self):
         text = (ROOT / "references" / "output-contract.md").read_text(encoding="utf-8")
-        for token in [
-            "Rule Parity Matrix", "Source code evidence", "Source behavior in plain English",
-            "Python code evidence", "Python behavior in plain English", "Parity result",
-            "Discrepancy", "Root cause", "Required remediation"
-        ]:
+        for token in ["Rule Parity Matrix", "Source code evidence", "Source behavior — plain English", "Python code evidence", "Python behavior — plain English", "Parity result", "Exact discrepancy", "Root cause", "Required remediation", "Revalidation required", "UNKNOWN — UNVERIFIED"]:
             self.assertIn(token, text)
 
-    def test_skill_requires_explainable_validation_discrepancies(self):
-        text = (ROOT / "SKILL.md").read_text(encoding="utf-8").lower()
-        for token in ["rule parity matrix", "plain english", "root cause", "required remediation"]:
+    def test_review_requires_evidence_only_and_no_unsupported_claims(self):
+        text = (ROOT / "references" / "adversarial-review.md").read_text(encoding="utf-8")
+        for token in ["evidence only", "UNKNOWN — UNVERIFIED", "unsupported_claims", "Never fill an evidence gap"]:
             self.assertIn(token, text)
 
 

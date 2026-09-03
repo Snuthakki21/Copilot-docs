@@ -27,7 +27,7 @@ From a repository checkout, Devin can use the root plugin structure when install
 
 The helper requires `openpyxl` for `.xlsx` input; install it from the organization's approved Artifactory/package index. It uses read-only, values-only workbook access. Generated jobs remain stdlib-first (`sqlite3`, `csv`, `decimal`, `pathlib`, etc.) unless discovered semantics justify an approved dependency.
 
-The governing migration rule is behavioral preservation: generated Python mirrors proven source behavior exactly, including legacy defects and quirks. Suspicious source behavior is documented, not repaired. The validator gates required artifacts, source→Python→test traceability, exact source/workbook provenance, structured function documentation, ≥80% Python coverage, and zero unresolved migration/security defects.
+The validator gates required artifacts, source→Python→test traceability, exact source/workbook provenance, structured function documentation, validation-report completeness, ≥80% Python coverage, zero unsupported claims, and zero unresolved/security/defect findings.
 
 Run skill self-tests:
 

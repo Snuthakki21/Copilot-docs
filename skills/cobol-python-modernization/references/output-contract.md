@@ -14,8 +14,8 @@ modernized/
     traceability.json
     tests/
       test_job.py
-    fixtures/
-    validation.db
+    fixtures/              # only source-derived/generated test fixtures actually used
+    validation.db          # generated locally when SQLite execution is performed; omit from git if large/sensitive
 ```
 
 Do not create shared business-logic modules across jobs. Shared tooling belongs to the skill; generated business logic belongs to that job's `job.py`.
@@ -23,10 +23,6 @@ Do not create shared business-logic modules across jobs. Shared tooling belongs 
 ## Governing parity rule
 
 The artifacts document and reproduce **observed legacy behavior**, even when that behavior is suspicious or appears incorrect. The migration must not change source logic to match a preferred interpretation, comment, business expectation, or modern best practice. Suspicious behavior is documented as an observation; it is not repaired in the migration unless source evidence itself proves the executable behavior differs.
-
-## Evidence-only accuracy rule
-
-Every material factual claim in lineage and validation must be supported by concrete evidence: exact source location/excerpt, Python location/excerpt, test/fixture result, file/DB reconciliation, or scheduler/DDL evidence. Never convert a plausible inference into a fact. If evidence is insufficient, write `UNKNOWN — UNVERIFIED`, add the item to `unsupported_claims` or `unresolved`, and block 100% until evidence resolves it.
 
 ## `lineage.md`
 
@@ -36,6 +32,8 @@ When behavior looks wrong, explicitly separate:
 - **Observed source behavior:** what the executable source actually does.
 - **Observation:** why the behavior may look unusual or suspicious.
 - **Migration action:** `PRESERVE` unless stronger source evidence proves another behavior.
+
+Do not change logic merely because the observation identifies a likely legacy defect.
 
 ## `job.py`
 
@@ -52,9 +50,9 @@ Failure behavior: Source-equivalent validation/errors/rollback/cleanup/exit impl
 Rule IDs: Source rule IDs implemented or supported by this function.
 ```
 
-Docstrings must be understandable without reading COBOL first. Comments inside functions explain why non-obvious logic exists and cite Rule IDs. If a rule appears defective, comment that it is intentionally preserved from source; do not silently correct it.
+Docstrings must be understandable without reading COBOL first. Comments inside functions explain why non-obvious logic exists and cite Rule IDs. If a rule appears defective, comment that it is intentionally preserved from source; do not silently correct it. Function names should describe source business intent rather than mechanical sequence.
 
-Do not introduce retries, stricter validation, atomic replacement, idempotency controls, transaction changes, ordering changes, deduplication, or alternate defaults unless they are proven behaviorally equivalent to the source.
+Do not introduce retries, stricter validation, atomic replacement, idempotency controls, transaction changes, ordering changes, deduplication, or alternate defaults unless they are proven behaviorally equivalent to the source. If a security/runtime necessity would change source outcomes, record it as an unresolved migration mismatch rather than choosing new behavior.
 
 ## `run.jil`
 
@@ -62,11 +60,11 @@ Autosys JIL invoking `python job.py ...`. Include job name, command, machine/con
 
 ## `oracle.sql` / `sqlite.sql`
 
-DDL for every table created or loaded by the Python job. Include behavior-relevant primary/unique keys, nullability, precision/scale, defaults, indexes/constraints, and DB2 semantics. Document any behavior that Oracle/SQLite cannot reproduce exactly and block 100% if it can affect results.
+DDL for every table created or loaded by the Python job. Include behavior-relevant primary/unique keys, nullability, precision/scale, defaults, indexes/constraints, and DB2 semantics. Use Oracle target datatypes in `oracle.sql`; use validation-compatible SQLite types/constraints in `sqlite.sql`. Document any behavior that Oracle/SQLite cannot reproduce exactly and block 100% if it can affect results.
 
 ## `tests/test_job.py`
 
-Runnable parity tests for business rules and job orchestration. Fixtures and expected results must have test-data provenance from source layouts/rules rather than being reverse-engineered from `job.py`. Tests assert what source evidence proves actually happens—including suspicious legacy behavior—not what the logic should ideally do.
+Runnable parity tests for business rules and job orchestration. Fixtures and expected results must have test-data provenance from source layouts/rules rather than being reverse-engineered from `job.py`. Tests assert what source evidence proves actually happens—including suspicious legacy behavior—not what the logic should ideally do. Cover normal, boundary, reject/error, DB transaction, empty-input, duplicate, restart/rerun, configuration, and ordering cases where applicable.
 
 ## `traceability.json`
 
@@ -94,92 +92,66 @@ Machine gate. Minimum shape:
 }
 ```
 
-`defects` means defects introduced by the migration, not known/suspected defects faithfully reproduced from source. `unsupported_claims` contains any material validation/lineage assertion for which the reviewer cannot point to sufficient evidence. A non-empty `unsupported_claims` list blocks 100%.
+`defects` means defects introduced by the migration, not known/suspected defects faithfully reproduced from source. Legacy quirks should be documented in lineage/validation and associated rule intent. `source_commit` and `workbook_sha256` represent the exact evidence used. `unsupported_claims` must list any material validation/review conclusion that cannot be tied to concrete source/Python/test/reconciliation evidence; a non-empty list blocks 100%.
 
 ## `validation_report.md`
 
-This is the primary human-readable parity artifact. It must be understandable by an executive who cannot read COBOL and useful to an engineer who must fix a mismatch.
+This is the primary human parity artifact. It must let a reviewer understand exactly what the legacy source does, exactly what Python does, and whether they match without having to infer either side.
 
-### Required top-level structure
+### Required structure
 
-1. **Executive Validation Summary** — PASS/FAIL, final score, job purpose, source commit/workbook hash, number of rules checked, passed rules, failed rules, unresolved/unverified items, coverage, and one-paragraph conclusion.
-2. **Rule Parity Matrix** — one row for every stable Rule ID discovered from JCL/COBOL/DB2/control-card behavior.
-3. **Detailed Discrepancies** — one subsection for every failed rule; omit only when every rule passes.
-4. **Preserved Legacy Quirks** — suspicious or apparently incorrect source behavior that Python mirrors exactly. These are not migration defects.
-5. **File / Database / Scheduler Reconciliation** — input/output counts, row/file comparisons, DB state, ordering, return codes, restart/rerun behavior, DDL/JIL checks.
-6. **Test / Coverage / Security Results** — tests, ≥80% coverage, adversarial review and security/defect results.
-7. **Final Verdict** — 100% only when no behaviorally material source/Python mismatch, unresolved evidence gap, or unsupported factual claim remains; otherwise 0% with blockers.
+1. **Executive Validation Summary** — job, source commit/workbook hash, overall PASS/FAIL, final score, rule counts (total/pass/fail/unverified/preserved-legacy), coverage, unresolved count, unsupported-claim count, and a one-paragraph factual conclusion.
+2. **Job-Level Parity Summary** — source JCL execution in plain English versus Python orchestration in plain English; inputs/outputs; DB interactions; step order/conditions; return codes; restart/rerun behavior; overall job-level verdict.
+3. **Rule Parity Matrix** — one entry for **every stable Rule ID** in `traceability.json`.
+4. **Detailed Discrepancies** — one subsection for every `FAIL` or `UNVERIFIED` Rule ID.
+5. **Preserved Legacy Behaviors** — suspicious/incorrect-looking source behaviors that Python intentionally mirrors; these are parity PASS items, not migration defects.
+6. **Reconciliation Evidence** — file/record counts, exact/canonicalized comparisons, DB row/aggregate comparisons, return codes, ordering checks, restart/rerun checks, and fixture provenance.
+7. **Test/Coverage and Review Evidence** — tests, coverage, adversarial review, security review, DDL/JIL review, unresolved/unsupported claims.
+8. **Final Verdict** — explicit 100% or 0%, with blocking Rule IDs if not 100%.
 
-### Rule Parity Matrix
+### Rule Parity Matrix contract
 
-For every rule, include all of these fields. Do not replace them with a generic summary.
+For each Rule ID include:
 
-| Field | Required content |
-|---|---|
-| **Rule ID** | Stable lineage ID, e.g. `R017`. |
-| **Job / Step / Program** | Exact context in which the rule executes. |
-| **Source location** | File/member and line/paragraph/JCL-step/control-card reference. |
-| **Source code evidence** | The smallest relevant COBOL/JCL/DB2/control-card excerpt or precise source reference needed to prove the behavior. |
-| **Source behavior in plain English** | What the source actually does, including conditions, calculations, side effects, outputs and failure behavior. Explain it without assuming COBOL knowledge. |
-| **Python location** | `job.py` function/line range implementing the rule. |
-| **Python code evidence** | The smallest relevant Python excerpt or precise source reference needed to prove the implementation. |
-| **Python behavior in plain English** | What the Python actually does when executed. Do not merely restate the code syntax. |
-| **Validation evidence** | Test IDs, fixture/case, SQLite/file comparison or other evidence used. |
-| **Parity result** | `PASS` only when source and Python behavior are materially equivalent; `FAIL` for a proven mismatch; `UNVERIFIED` when evidence is insufficient. |
-| **Discrepancy** | `None` for PASS. For FAIL, a plain-English statement of exactly what behavior differs. For UNVERIFIED, state what cannot yet be proven. |
-| **Root cause** | `N/A` for PASS. For FAIL, state only an evidence-backed cause. If not proven, use `UNKNOWN — additional source tracing required`. |
-| **Required remediation** | `None` for PASS. For FAIL, the specific change needed in Python/tests/DDL/JIL to restore source parity. For UNVERIFIED, state the evidence needed before remediation can be prescribed safely. |
+- **Rule ID / source program / step**
+- **Source code evidence:** exact JCL/COBOL/copybook/DB2/control-card path and line/paragraph reference plus the smallest useful code excerpt.
+- **Source behavior — plain English:** describe only what that cited source demonstrably does: triggering condition, transformation/calculation, side effects, outputs, errors/return code, and ordering/state implications when relevant.
+- **Python code evidence:** `job.py` function and line range plus the smallest useful code excerpt.
+- **Python behavior — plain English:** describe what the cited Python demonstrably does using the same dimensions as source behavior.
+- **Validation evidence:** exact test name/fixture/reconciliation result used to compare them.
+- **Parity result:** `PASS`, `FAIL`, or `UNVERIFIED`. For suspicious source behavior faithfully mirrored in Python use `PASS — PRESERVED LEGACY BEHAVIOR`.
+- **Reviewer explanation:** concise plain-English explanation of why the evidence establishes the result.
 
-A reviewer should be able to read one row and answer: **What did COBOL do? What does Python do? Are they the same? If not, exactly why not and what must be changed? If we cannot prove the answer, is that uncertainty explicitly visible?**
+Do not merely say “equivalent” or “mismatch.” The report must show the code/evidence and explain both behaviors independently before comparing them.
 
-### Detailed Discrepancies
+### Detailed discrepancy contract
 
-For each `FAIL`, add a subsection using this structure:
+For every `FAIL`, include:
 
 ```text
-Rule ID / Job / Step / Program:
-Severity to parity: BLOCKING
-
-Source code evidence:
-<source excerpt/reference>
-
-Source behavior in plain English:
-<clear explanation>
-
-Python code evidence:
-<Python excerpt/reference>
-
-Python behavior in plain English:
-<clear explanation>
-
-Discrepancy:
-<exact behavioral difference>
-
-Why this discrepancy exists / Root cause:
-<evidence-backed cause; UNKNOWN if not proven>
-
-Observed impact:
-<records, files, DB state, control flow, return codes, ordering, restart behavior, etc.>
-
-Required remediation to restore parity:
-<specific Python/test/DDL/JIL action; never redesign legacy business logic>
-
-Validation required after remediation:
-<tests/reconciliation that must be rerun>
-
-Evidence supporting this conclusion:
-<source/Python/test/reconciliation references>
-
-Status:
-OPEN | RESOLVED AND REVALIDATED
+Rule ID:
+Source expectation: <plain English, backed by cited source evidence>
+Python behavior: <plain English, backed by cited Python evidence>
+Exact discrepancy: <specific behavioral difference>
+Root cause: <why Python differs, only when proven by evidence>
+Observed impact: <specific files/records/rows/state/return-code/order affected, only when proven>
+Required remediation: <specific Python change needed to restore source parity; do not change source business logic>
+Revalidation required: <tests/reconciliation that must be rerun>
+Status: OPEN | RESOLVED AND REVALIDATED
 ```
 
-Never guess a root cause, impact, or remediation. If evidence does not establish it, write `UNKNOWN — additional source tracing required`, add the unsupported point to `traceability.json.unsupported_claims` or `unresolved`, and keep the job at 0%.
+For `UNVERIFIED`, replace unsupported conclusions with `UNKNOWN — UNVERIFIED`, state exactly which evidence is missing, and record it in `traceability.json.unsupported_claims` or `unresolved`. Never invent a root cause, impact, intent, or remediation to make the report look complete.
 
-### Preserved legacy quirks
+### Evidence and accuracy rules
 
-Use the same source/plain-English/Python/plain-English comparison when useful, but label the result `PASS — PRESERVED LEGACY BEHAVIOR`. Explain why it looks suspicious and explicitly state that no correction was made because behavioral preservation is the migration contract.
+- Every Rule ID in `traceability.json` must appear in the Rule Parity Matrix. No silent omissions.
+- Every material factual statement about source/Python behavior, root cause, impact, or remediation must be traceable to concrete evidence included or referenced in the report.
+- Code excerpts are evidence; plain English is an explanation of that evidence, never a replacement for it.
+- If source behavior cannot be proven from available artifacts, mark it `UNVERIFIED`; never infer what COBOL “probably” means.
+- If Python behavior cannot be proven from code/tests/results, mark it `UNVERIFIED`.
+- If root cause cannot be proven, write `Root cause: UNKNOWN — UNVERIFIED` rather than speculating.
+- A non-empty `unsupported_claims` or unresolved list blocks 100%.
 
 The adversarial question is: **Does Python behave differently from source anywhere?** It is not: **Can the source logic be improved?** A faithfully reproduced source defect is parity. A source/Python difference is a migration defect.
 
-The score is `100%` only when `scripts/modernization_tools.py <job-folder>` exits 0 and no behaviorally material source/Python mismatch, unresolved evidence gap, or unsupported factual claim remains. Otherwise score `0%` and explain blockers; do not use subjective partial percentages.
+The score is `100%` only when `scripts/modernization_tools.py <job-folder>` exits 0 and every Rule ID is evidence-backed PASS (including preserved-legacy PASS). Otherwise score `0%` and explain blockers; do not use subjective partial percentages.
