@@ -12,6 +12,8 @@ Trace first, translate second, prove last. The governing requirement is **behavi
 
 Never infer success from plausible Python. A job is complete only when every discovered source behavior has evidence in the lineage, Python, scheduler artifact, tests, validation report, and validation manifest. **When evidence is missing, fail closed**: produce diagnostics, do not invent behavior, and do not ask the user to restate information discoverable from the repository.
 
+**Evidence-only review rule:** no material claim about source behavior, Python behavior, parity, root cause, impact, or remediation may be asserted without concrete evidence. If evidence is insufficient, write `UNKNOWN — UNVERIFIED`, add the item to `unsupported_claims` or `unresolved`, and keep the job at 0%. Never fill an evidence gap with a plausible explanation.
+
 **Efficiency rule:** apply **Ponytail v4.9.0** only after full source tracing. Reuse repository patterns, prefer Python stdlib, use `sqlite3` for validation, stream large files where that does not alter semantics, and add dependencies only when needed. Efficiency may reduce implementation complexity; it may never change source behavior.
 
 ## Required inputs and discovery
@@ -42,8 +44,9 @@ Do not ask for missing implementation details. If a referenced artifact truly ca
 7. Write `tests/test_job.py`. Tests must be source-derived and prove parity, including legacy quirks and suspicious behavior. Measure all generated `.py` files; **80% is a floor, not a target to game**.
 8. Execute the job against representative source-derived fixtures and SQLite. Compare record counts, key aggregates, row/file content, ordering where meaningful, rejects, return codes, DB state, and rerun/restart behavior.
 9. Perform the independent adversarial review in `references/adversarial-review.md`. The reviewer asks “Where does Python differ from source?” rather than “How should this logic be improved?”
-10. Build `validation_report.md` as the definitive human-readable comparison. It must contain an **Executive Validation Summary**, a **Rule Parity Matrix** for every rule, and detailed discrepancy sections for every `FAIL`. For each rule show the source code evidence, **source behavior in plain English**, Python code evidence, **Python behavior in plain English**, validation evidence, and parity result. For every mismatch explain the exact discrepancy, evidence-backed **root cause**, observed impact, **required remediation** to restore source parity, and revalidation required. Never guess the root cause; if unknown, say so and keep the job at 0%.
-11. Write `traceability.json`, then run `python scripts/modernization_tools.py <job-folder>`. A **100%** score is allowed only when complete rule traces, the Rule Parity Matrix, documented functions, source provenance, Python coverage ≥80%, and zero unresolved migration mismatches/security defects are present. Suspicious-but-faithfully-preserved source behavior is documented separately and does not reduce parity.
+10. Build `validation_report.md` as the definitive human-readable comparison. It must contain an **Executive Validation Summary**, a **Rule Parity Matrix** for every rule, and detailed discrepancy sections for every `FAIL`. For each rule show the source code evidence, **source behavior in plain English**, Python code evidence, **Python behavior in plain English**, validation evidence, and parity result. For every mismatch explain the exact discrepancy, evidence-backed **root cause**, observed impact, **required remediation** to restore source parity, and revalidation required. If any of those cannot be proven, mark them `UNKNOWN — UNVERIFIED` rather than guessing.
+11. Perform an unsupported-claim sweep over the validation report. Every material factual sentence must be backed by source/Python/test/reconciliation evidence, explicitly labeled as observation, or explicitly `UNKNOWN/UNVERIFIED`. Put any unsupported factual assertion in `traceability.json.unsupported_claims`.
+12. Write `traceability.json`, then run `python scripts/modernization_tools.py <job-folder>`. A **100%** score is allowed only when complete rule traces, the Rule Parity Matrix, documented functions, source provenance, Python coverage ≥80%, empty `unsupported_claims`, and zero unresolved migration mismatches/security defects are present. Suspicious-but-faithfully-preserved source behavior is documented separately and does not reduce parity.
 
 ## Required outputs
 
@@ -77,6 +80,7 @@ Batch repository reads by job and reuse a source index across steps. Parse each 
 | “Fixing” logic that looks incorrect | Preserve it exactly, flag it as an observed legacy behavior, and leave remediation for a separate effort. |
 | Validation says only “mismatch” | Show source evidence + plain English, Python evidence + plain English, exact discrepancy, root cause, impact, remediation, and revalidation. |
 | Guessing why a mismatch exists | State `UNKNOWN — additional source tracing required`; do not invent a cause. |
+| Making an unsupported validation claim | Add it to `unsupported_claims`, mark it unverified, and block 100% until evidence supports or removes it. |
 | Treating comments/business names as stronger than execution | Document disagreement and preserve executable source behavior unless stronger evidence resolves it. |
 | Treating working/converted code as truth | Production JCL/COBOL/DB2 is authoritative unless source evidence proves otherwise. |
-| Claiming 100% because tests pass | Require provenance, Rule Parity Matrix, documented functions, full rule traceability, ≥80% coverage, and zero migration mismatches. |
+| Claiming 100% because tests pass | Require provenance, Rule Parity Matrix, documented functions, full rule traceability, ≥80% coverage, empty unsupported claims, and zero migration mismatches. |
