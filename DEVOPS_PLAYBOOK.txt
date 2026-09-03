@@ -1,0 +1,148 @@
+COBOL-TO-PYTHON MODERNIZATION DEVOPS PLAYBOOK
+=============================================
+
+PURPOSE
+-------
+This repository-level playbook defines the delivery controls for Python batch jobs produced by the cobol-python-modernization skill. It is shared by all jobs; job-specific business behavior stays in each generated job folder. Adapt organization-specific platform names, approval groups, URLs, and credentials through controlled configuration rather than copying secrets into source.
+
+1. SOURCE CONTROL AND TRACEABILITY
+----------------------------------
+- Use a protected main/release branch and short-lived feature branches for modernization changes.
+- Every generated job must record the immutable source-mainframe commit SHA and SHA-256 of the Excel workbook used for generation.
+- Keep lineage, Python, JIL, DDL, tests, traceability.json, and validation report in the same reviewed change.
+- Require peer review for business-parity changes and DevOps/platform review for scheduler, database, dependency, or runtime changes.
+- Tags/releases should identify the modernized job set and source evidence baseline so a deployed artifact can always be traced back.
+
+2. DEPENDENCIES AND ARTIFACTORY
+-------------------------------
+- Resolve Python packages only from the enterprise Artifactory/package repository approved for the environment.
+- Prefer Python standard library. Add third-party dependencies only when needed for correctness, scale, security, or an enterprise standard.
+- Pin direct dependency versions using the organization's approved lock/requirements mechanism and retain dependency provenance/SBOM when available.
+- Do not download packages, binaries, database clients, or scanners directly from arbitrary public registries during CI or runtime.
+- Fail CI if an unapproved dependency source is detected.
+
+3. CI QUALITY GATES
+-------------------
+For every pull request/change, CI should run in this order:
+1) compile/import validation for all generated Python;
+2) unit and job-orchestration tests;
+3) coverage across generated .py files, minimum 80%;
+4) deterministic modernization validator for every changed job folder;
+5) approved lint/static-analysis tools;
+6) approved SAST/dependency/secrets scans;
+7) SQLite functional/parity validation using source-derived fixtures;
+8) DDL syntax/review checks where approved Oracle tooling is available;
+9) JIL syntax/policy validation where Autosys tooling is available;
+10) package/container build verification for the OCP target.
+No job is releasable while any required gate is red or while validation_report.md is FAIL/0%.
+
+4. TEST DATA AND SQLITE VALIDATION
+----------------------------------
+- SQLite is the local/CI database surrogate until an Oracle validation environment is available.
+- Test fixtures must come from source layouts/rules or approved masked/synthetic equivalents with documented provenance.
+- Never commit production-sensitive data into Git.
+- Reconcile inputs and outputs using record counts, reject counts, exact/canonicalized records, key aggregates, database rows, return codes, and restart/rerun behavior.
+- Preserve validation logs/results as CI evidence for the release according to enterprise retention policy.
+
+5. ORACLE PROMOTION
+-------------------
+- Treat oracle.sql as the target DDL specification, not proof of Oracle runtime parity.
+- Before production promotion, validate Oracle datatype precision/scale, CHAR/VARCHAR padding, NULL/empty-string behavior, sequences/identity, indexes/constraints, transaction boundaries, isolation/locking, SQL syntax/functions, dates/timestamps, and query ordering.
+- Run the same source-derived parity suite against Oracle when the environment becomes available.
+- Oracle promotion must not be approved solely because SQLite passed; record Oracle-specific validation evidence in the release.
+- Database schema changes require normal DBA/change-management review and a tested backward/rollback path where the organization requires one.
+
+6. OCP CONTAINER EXPECTATIONS
+-----------------------------
+- Build an immutable container image from the reviewed source commit; do not patch application code inside a running pod.
+- Use the enterprise base image and image registry approved for OCP.
+- Run as a non-root user where platform policy permits; use read-only filesystem/default-deny permissions where practical.
+- Inject environment-specific configuration and secrets at deployment/runtime using approved OCP/configuration-secret mechanisms; never bake credentials into the image.
+- Define CPU/memory/ephemeral-storage requests and limits based on representative batch volume tests, especially for large files.
+- Emit logs to stdout/stderr or the approved logging path and preserve a non-zero process exit code on job failure.
+- Scan the built image with the approved container/security scanner before promotion.
+
+7. AUTOSYS DEPLOYMENT
+---------------------
+- The generated run.jil is the scheduler definition for the target Autosys environment.
+- Parameterize environment-specific machine/container target, owner, paths, profiles, predecessor/successor dependencies, calendars, and notification settings through controlled deployment values.
+- The exact command deployed to Autosys must match the command tested in CI/release validation.
+- Map Python exit codes to Autosys success/failure behavior explicitly. Do not hide application failures behind wrapper scripts that return zero.
+- Validate rerun/restart behavior, concurrent-run policy, file arrival/dependency conditions, timeout expectations, and log locations before production enablement.
+
+8. CONFIGURATION AND SECRETS
+----------------------------
+- Separate business logic from environment configuration.
+- Validate required configuration at startup and fail fast with a clear non-secret error when it is missing or invalid.
+- Store database credentials, tokens, certificates, and passwords only in approved secret-management facilities.
+- Never put secrets in Git, JIL, command-line arguments visible to process listings when avoidable, logs, test fixtures, SQLite files, or validation reports.
+- Rotate/revoke exposed credentials through the enterprise incident process rather than merely deleting them from a later commit.
+
+9. LOGGING, MONITORING, AND OBSERVABILITY
+-----------------------------------------
+- Log job start/end, source/business date or run identifier where applicable, step start/end, input/output/reject counts, checkpoints, elapsed duration, and failures.
+- Include job/step/rule identifiers that help trace failures back to lineage without logging sensitive record payloads.
+- Monitoring should alert on non-zero exits, missed schedules, abnormal duration, unexpected input/output counts, repeated retries, resource exhaustion, and database/connectivity failures.
+- Establish dashboards/searches using the enterprise monitoring platform and define who receives alerts.
+- Avoid high-cardinality or record-per-row logging for production-scale files unless explicitly required.
+
+10. SECURITY AND DEFECT CONTROLS
+--------------------------------
+- Run approved SAST, dependency, secret, and container scans in CI/release pipelines.
+- Review path handling, SQL parameterization, subprocess/shell invocation, temporary-file permissions, unsafe deserialization, eval/exec, sensitive logs, and unbounded input/resource use.
+- High/medium findings require remediation or the organization's documented risk-acceptance process before release; the modernization skill itself still cannot claim 100% while open findings remain.
+- Compile and test after security fixes because security changes can alter business behavior.
+
+11. RELEASE AND PROMOTION MODEL
+-------------------------------
+Recommended flow: feature branch -> pull request CI -> integration validation with SQLite -> approved container build -> lower OCP environment -> Oracle parity validation when available -> Autosys lower-environment schedule test -> production approval -> production deploy/enable.
+- Promote the same immutable application artifact/image between environments; change configuration, not code.
+- Preserve release evidence: commit SHA, image digest, dependency/SBOM evidence if available, test/coverage results, validator output, security scans, SQLite/Oracle reconciliation, DDL approval, JIL approval, and change ticket/reference.
+- Do not regenerate application code during environment promotion.
+
+12. ROLLBACK AND RECOVERY
+-------------------------
+- Define rollback before production enablement: previous application image/version, previous JIL/configuration, and database rollback/forward-fix procedure.
+- For jobs that write files or tables, define what happens to partial outputs before rerun. Prefer transactional DB work and atomic output-file replacement where business semantics allow.
+- Make restart checkpoints and idempotency behavior explicit. A retry must not silently duplicate business effects.
+- Test rollback/recovery in a lower environment for changes with material data impact.
+- If a database migration is not safely reversible, document the forward-fix/data-restoration procedure and required backups before deployment.
+
+13. PERFORMANCE AND CAPACITY
+----------------------------
+- Test representative and upper-bound file/row volumes; COBOL batch workloads can be much larger than developer fixtures.
+- Prefer streaming and bounded database batches. Track peak memory, elapsed time, database commit frequency, temporary storage, and output size.
+- Establish an Autosys timeout/SLA based on evidence rather than the developer-machine runtime.
+- Revisit implementation only when measured throughput/resource behavior fails the required batch window; do not pre-emptively add frameworks or distributed processing.
+
+14. OWNERSHIP AND OPERATIONS
+----------------------------
+For each production job, record ownership in the organization's normal service catalog/runbook system:
+- business owner: validates business outcomes and rule intent;
+- application owner: owns Python code, lineage, tests, and defects;
+- DevOps/platform owner: owns pipeline, OCP deployment, runtime configuration, and release automation;
+- scheduler owner: owns Autosys calendars/dependencies/operational scheduling;
+- database owner/DBA: owns Oracle schema/change controls and database operations;
+- support/on-call owner: responds to failed/missed runs and follows recovery procedures.
+Escalation paths, support hours, RTO/RPO where applicable, and upstream/downstream contacts should be known before production cutover.
+
+15. PRODUCTION READINESS CHECKLIST
+---------------------------------
+A job is production-ready only when all applicable items are complete:
+[ ] Source commit and workbook hash recorded.
+[ ] Lineage/rule traceability reviewed.
+[ ] Python functions documented in plain English.
+[ ] Tests pass and generated-Python coverage is >=80%.
+[ ] Modernization validator reports 100%.
+[ ] SQLite reconciliation passes; Oracle parity evidence exists before Oracle production use.
+[ ] No unresolved functional defects or unaccepted security findings.
+[ ] Dependency sources are approved through Artifactory.
+[ ] Immutable OCP image built/scanned and configuration/secrets externalized.
+[ ] Autosys run.jil tested in a lower environment with correct exit/failure behavior.
+[ ] Monitoring/alerts/logging and ownership are established.
+[ ] Large-volume performance fits the batch window and resource limits.
+[ ] Restart/idempotency and partial-output recovery are tested.
+[ ] Rollback/forward-fix procedure and database recovery approach are approved.
+[ ] Release evidence and change-management approvals are retained.
+
+END OF PLAYBOOK
