@@ -1,0 +1,9 @@
+{
+  "name": "cobol-python-modernization",
+  "version": "1.0.0",
+  "description": "Evidence-first batch modernization skill for JCL, COBOL, DB2 and file-based jobs to Python with SQLite validation and Oracle-ready DDL.",
+  "author": {"name": "Snuthakki21"},
+  "repository": "https://github.com/Snuthakki21/Copilot-docs",
+  "license": "MIT",
+  "keywords": ["cobol", "jcl", "db2", "python", "modernization", "autosys", "oracle"]
+}
