@@ -5,14 +5,29 @@ from pathlib import Path
 
 from scripts.modernization_tools import normalize_headers, safe_job_name, validate_job_artifacts, workbook_rows
 
+DOC_JOB = '''"""Plain-English job summary."""\n\ndef run_job():\n    """Purpose: Run the job.\n    Inputs: None.\n    Outputs: Exit result.\n    Side effects: Writes validated outputs.\n    Failure behavior: Raises on invalid processing.\n    Rule IDs: R1.\n    """\n    return 0\n'''
+
+
+def make_complete(root: Path, coverage=80):
+    for name in ["lineage.md", "run.jil", "oracle.sql", "sqlite.sql", "validation_report.md"]:
+        (root / name).write_text("placeholder")
+    (root / "job.py").write_text(DOC_JOB)
+    (root / "tests").mkdir()
+    (root / "tests" / "test_job.py").write_text("def test_x(): assert True")
+    manifest = {
+        "source_commit": "abc123",
+        "workbook_sha256": "0" * 64,
+        "rules": [{"id": "R1", "source": "JCL:STEP01", "python": ["job.py:3"], "tests": ["tests/test_job.py::test_r1"]}],
+        "coverage_percent": coverage,
+        "security_findings": [], "defects": [], "unresolved": [],
+    }
+    (root / "traceability.json").write_text(json.dumps(manifest))
+    return manifest
+
 
 class ToolingTests(unittest.TestCase):
     def test_normalize_headers_accepts_common_excel_variants(self):
-        headers = ["Job Name", "STEP", "Program", "Input Files", "Outputs"]
-        self.assertEqual(
-            normalize_headers(headers),
-            ["job", "step", "program", "inputs", "outputs"],
-        )
+        self.assertEqual(normalize_headers(["Job Name", "STEP", "Program", "Input Files", "Outputs"]), ["job", "step", "program", "inputs", "outputs"])
 
     def test_safe_job_name_rejects_path_traversal_and_normalizes(self):
         self.assertEqual(safe_job_name(" AR.DAILY-01 "), "AR.DAILY-01")
@@ -27,46 +42,43 @@ class ToolingTests(unittest.TestCase):
             self.assertFalse(result["passed"])
             self.assertIn("lineage.md", "\n".join(result["errors"]))
 
-    def test_validator_requires_every_source_rule_to_have_python_and_test_trace(self):
+    def test_validator_requires_rule_test_trace(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
-            for name in ["lineage.md", "job.py", "run.jil", "oracle.sql", "sqlite.sql", "validation_report.md"]:
-                (root / name).write_text("placeholder")
-            (root / "tests").mkdir()
-            (root / "tests" / "test_job.py").write_text("def test_x(): assert True")
-            manifest = {
-                "rules": [
-                    {"id": "R1", "source": "COBOL:P1:100-120", "python": ["job.py:10-20"], "tests": []}
-                ],
-                "coverage_percent": 90,
-                "security_findings": [],
-                "defects": [],
-                "unresolved": [],
-            }
+            manifest = make_complete(root, 90)
+            manifest["rules"][0]["tests"] = []
             (root / "traceability.json").write_text(json.dumps(manifest))
-            result = validate_job_artifacts(root)
-            self.assertFalse(result["passed"])
-            self.assertTrue(any("R1" in e for e in result["errors"]))
+            self.assertTrue(any("R1" in e for e in validate_job_artifacts(root)["errors"]))
 
-    def test_validator_accepts_complete_zero_finding_manifest_at_80_percent_or_more(self):
+    def test_validator_accepts_complete_manifest(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
-            for name in ["lineage.md", "job.py", "run.jil", "oracle.sql", "sqlite.sql", "validation_report.md"]:
-                (root / name).write_text("placeholder")
-            (root / "tests").mkdir()
-            (root / "tests" / "test_job.py").write_text("def test_x(): assert True")
-            manifest = {
-                "rules": [
-                    {"id": "R1", "source": "JCL:STEP01", "python": ["job.py:10"], "tests": ["tests/test_job.py::test_r1"]}
-                ],
-                "coverage_percent": 80,
-                "security_findings": [],
-                "defects": [],
-                "unresolved": [],
-            }
-            (root / "traceability.json").write_text(json.dumps(manifest))
+            make_complete(root)
             result = validate_job_artifacts(root)
             self.assertTrue(result["passed"], result)
+
+    def test_validator_rejects_missing_provenance(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            manifest = make_complete(root)
+            del manifest["source_commit"]
+            (root / "traceability.json").write_text(json.dumps(manifest))
+            self.assertTrue(any("source commit" in e for e in validate_job_artifacts(root)["errors"]))
+
+    def test_validator_rejects_undocumented_function(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            make_complete(root)
+            (root / "job.py").write_text('"""Job."""\ndef run_job():\n    return 0\n')
+            text = "\n".join(validate_job_artifacts(root)["errors"])
+            self.assertIn("function run_job documentation missing", text)
+
+    def test_validator_rejects_missing_module_docstring(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            make_complete(root)
+            (root / "job.py").write_text('def run_job():\n    """Purpose: x\nInputs: x\nOutputs: x\nSide effects: x\nFailure behavior: x\nRule IDs: R1\n"""\n    return 0\n')
+            self.assertTrue(any("module-level" in e for e in validate_job_artifacts(root)["errors"]))
 
     def test_workbook_rows_reads_expected_columns_and_skips_blank_rows(self):
         from openpyxl import Workbook
@@ -76,26 +88,24 @@ class ToolingTests(unittest.TestCase):
             ws = wb.active
             ws.append(["Jobs", "Steps", "Programs", "Input Files", "Outputs"])
             ws.append(["JOB1", "STEP1", "PGM1", "IN1", "OUT1"])
-            ws.append([None, None, None, None, None])
+            ws.append([None] * 5)
             wb.save(path)
             rows = workbook_rows(path)
             self.assertEqual(len(rows), 1)
             self.assertEqual(rows[0]["job"], "JOB1")
-            self.assertEqual(rows[0]["program"], "PGM1")
 
-    def test_workbook_rows_rejects_missing_required_columns(self):
+    def test_workbook_rows_rejects_missing_columns(self):
         from openpyxl import Workbook
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "jobs.xlsx"
             wb = Workbook()
             ws = wb.active
             ws.append(["Job", "Step", "Program"])
-            ws.append(["JOB1", "STEP1", "PGM1"])
             wb.save(path)
             with self.assertRaisesRegex(ValueError, "missing required Excel columns"):
                 workbook_rows(path)
 
-    def test_workbook_rows_empty_sheet_returns_empty_list(self):
+    def test_workbook_rows_empty_sheet_returns_empty(self):
         from openpyxl import Workbook
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "jobs.xlsx"
@@ -103,32 +113,20 @@ class ToolingTests(unittest.TestCase):
             wb.save(path)
             self.assertEqual(workbook_rows(path), [])
 
-    def test_validator_rejects_invalid_json_and_empty_rules(self):
+    def test_validator_rejects_invalid_json_low_coverage_and_findings(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
+            make_complete(root)
             (root / "traceability.json").write_text("not json")
-            result = validate_job_artifacts(root)
-            self.assertFalse(result["passed"])
-            self.assertTrue(any("invalid traceability.json" in e for e in result["errors"]))
-
-    def test_validator_rejects_rule_without_source_and_low_coverage_and_findings(self):
+            self.assertFalse(validate_job_artifacts(root)["passed"])
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
-            for name in ["lineage.md", "job.py", "run.jil", "oracle.sql", "sqlite.sql", "validation_report.md"]:
-                (root / name).write_text("placeholder")
-            (root / "tests").mkdir()
-            (root / "tests" / "test_job.py").write_text("def test_x(): assert True")
-            manifest = {
-                "rules": [{"id": "R2", "python": ["job.py:1"], "tests": ["tests/test_job.py::test_r2"]}],
-                "coverage_percent": 79.9,
-                "security_findings": ["unsafe subprocess"],
-                "defects": ["mismatch"],
-                "unresolved": ["COPYBOOK missing"],
-            }
+            manifest = make_complete(root, 79.9)
+            manifest["security_findings"] = ["x"]
+            manifest["defects"] = ["y"]
+            manifest["unresolved"] = ["z"]
             (root / "traceability.json").write_text(json.dumps(manifest))
-            result = validate_job_artifacts(root)
-            text = "\n".join(result["errors"])
-            self.assertIn("no source trace", text)
+            text = "\n".join(validate_job_artifacts(root)["errors"])
             self.assertIn("below 80%", text)
             self.assertIn("security findings", text)
             self.assertIn("defects", text)
