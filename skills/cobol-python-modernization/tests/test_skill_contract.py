@@ -2,7 +2,6 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-REPO_ROOT = ROOT.parents[1]
 
 
 class SkillContractTests(unittest.TestCase):
@@ -26,17 +25,21 @@ class SkillContractTests(unittest.TestCase):
         for token in ["plain English", "Purpose:", "Inputs:", "Outputs:", "Side effects:", "Failure behavior:", "Rule IDs:"]:
             self.assertIn(token, text)
 
-    def test_skill_requires_operational_readiness_checks(self):
-        text = (ROOT / "SKILL.md").read_text(encoding="utf-8")
-        for token in ["observability", "configuration", "reproducibility", "idempotency", "large-file", "test-data provenance"]:
+    def test_skill_requires_behavioral_preservation_even_for_suspicious_logic(self):
+        text = (ROOT / "SKILL.md").read_text(encoding="utf-8").lower()
+        for token in ["behavioral preservation", "including defects", "do not correct", "source behavior", "quirk"]:
             self.assertIn(token, text)
 
-    def test_repository_level_devops_playbook_exists_and_is_complete(self):
-        playbook = REPO_ROOT / "DEVOPS_PLAYBOOK.txt"
-        self.assertTrue(playbook.is_file())
-        text = playbook.read_text(encoding="utf-8")
-        for token in ["Artifactory", "CI", "SQLite", "Oracle", "OCP", "Autosys", "rollback", "secrets", "monitoring", "ownership"]:
+    def test_prompt_prohibits_logic_correction_during_migration(self):
+        text = (ROOT / "PROMPT.md").read_text(encoding="utf-8").lower()
+        for token in ["do not fix", "incorrect", "quirks", "mirror", "source behavior"]:
             self.assertIn(token, text)
+
+    def test_output_contract_separates_suspicious_behavior_from_migration_changes(self):
+        text = (ROOT / "references" / "output-contract.md").read_text(encoding="utf-8").lower()
+        self.assertIn("observed legacy behavior", text)
+        self.assertIn("do not change", text)
+        self.assertIn("suspicious", text)
 
 
 if __name__ == "__main__":
