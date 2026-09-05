@@ -20,12 +20,15 @@ jobs:
       - uses: actions/checkout@v6
         with:
           ref: mainframe-modernization-v2-verified-20260905
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
       - name: Materialize only the hash-checked synthetic delivery
         id: unpack
         shell: python
         run: |
           from pathlib import Path, PurePosixPath
-          import base64, hashlib, io, json, lzma, os, tarfile
+          import base64, hashlib, io, json, lzma, os, tarfile, zipfile
           parent = Path('mainframe-modernization-framework')
           delivery = parent / '_delivery'
           marker = delivery / 'READY.json'
@@ -45,20 +48,36 @@ jobs:
           archive = tarfile.open(fileobj=io.BytesIO(lzma.decompress(packed)), mode='r:')
           members = archive.getmembers()
           if len(members) != manifest['file_count']: raise RuntimeError('Unexpected file count')
-          for member in members:
+          def destination(member):
               name = PurePosixPath(member.name)
               if not member.isfile() or name.is_absolute() or '..' in name.parts or name.parts[0] != parent.name:
                   raise RuntimeError('Unsafe archive member')
-              destination = Path(*name.parts)
-              if destination.exists(): raise RuntimeError('Refusing to overwrite an existing repository file')
+              path = Path(*name.parts)
+              if path.name.endswith('.pptx.rebuild.json'): path = path.with_name(path.name.removesuffix('.rebuild.json'))
+              return path
           for member in members:
-              destination = Path(*PurePosixPath(member.name).parts)
-              destination.parent.mkdir(parents=True, exist_ok=True)
-              destination.write_bytes(archive.extractfile(member).read())
+              if destination(member).exists(): raise RuntimeError('Refusing to overwrite an existing repository file')
+          for member in members:
+              path = destination(member)
+              data = archive.extractfile(member).read()
+              if member.name.endswith('.pptx.rebuild.json'):
+                  buffer = io.BytesIO()
+                  with zipfile.ZipFile(buffer, 'w') as office:
+                      for entry in json.loads(data):
+                          info = zipfile.ZipInfo(entry['filename'], tuple(entry['date_time']))
+                          for key in ('compress_type','create_system','create_version','extract_version','reserved','flag_bits','volume','internal_attr','external_attr'):
+                              setattr(info, key, entry[key])
+                          info.extra = base64.b64decode(entry['extra'])
+                          info.comment = base64.b64decode(entry['comment'])
+                          content = entry['text'].encode('utf-8') if 'text' in entry else base64.b64decode(entry['base64'])
+                          office.writestr(info, content)
+                  data = buffer.getvalue()
+              path.parent.mkdir(parents=True, exist_ok=True)
+              path.write_bytes(data)
           child = parent / 'mainframe-modernization'
           expected = json.loads((child / 'PACKAGE_MANIFEST.json').read_text())['files']
           for name, checksum in expected.items():
-              if hashlib.sha256((child / name).read_bytes()).hexdigest() != checksum: raise RuntimeError('Child integrity mismatch')
+              if hashlib.sha256((child / name).read_bytes()).hexdigest() != checksum: raise RuntimeError('Child integrity mismatch: ' + name)
           with open(os.environ['GITHUB_OUTPUT'], 'a') as out: out.write('ready=true\n')
       - name: Commit only the requested folder; remove delivery transport
         id: commit
