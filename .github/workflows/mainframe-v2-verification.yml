@@ -1,0 +1,107 @@
+name: Mainframe v2 package verification
+on:
+  push:
+    branches: [mainframe-modernization-v2-verified-20260905]
+    paths:
+      - 'mainframe-modernization-framework/_delivery/READY.json'
+      - '.github/workflows/mainframe-v2-verification.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      ready: ${{ steps.unpack.outputs.ready }}
+      commit: ${{ steps.commit.outputs.commit }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: mainframe-modernization-v2-verified-20260905
+      - name: Materialize only the hash-checked synthetic delivery
+        id: unpack
+        shell: python
+        run: |
+          from pathlib import Path, PurePosixPath
+          import base64, hashlib, io, json, lzma, os, tarfile
+          parent = Path('mainframe-modernization-framework')
+          delivery = parent / '_delivery'
+          marker = delivery / 'READY.json'
+          if not marker.is_file():
+              with open(os.environ['GITHUB_OUTPUT'], 'a') as out: out.write('ready=false\n')
+              raise SystemExit(0)
+          manifest = json.loads(marker.read_text())
+          parts = []
+          for item in manifest['parts']:
+              path = delivery / item['name']
+              if path.parent != delivery: raise RuntimeError('Invalid delivery path')
+              raw = base64.b64decode(path.read_text().strip(), validate=True)
+              if hashlib.sha256(raw).hexdigest() != item['sha256']: raise RuntimeError('Part hash mismatch')
+              parts.append(raw)
+          packed = b''.join(parts)
+          if hashlib.sha256(packed).hexdigest() != manifest['sha256']: raise RuntimeError('Archive hash mismatch')
+          archive = tarfile.open(fileobj=io.BytesIO(lzma.decompress(packed)), mode='r:')
+          members = archive.getmembers()
+          if len(members) != manifest['file_count']: raise RuntimeError('Unexpected file count')
+          for member in members:
+              name = PurePosixPath(member.name)
+              if not member.isfile() or name.is_absolute() or '..' in name.parts or name.parts[0] != parent.name:
+                  raise RuntimeError('Unsafe archive member')
+              destination = Path(*name.parts)
+              if destination.exists(): raise RuntimeError('Refusing to overwrite an existing repository file')
+          for member in members:
+              destination = Path(*PurePosixPath(member.name).parts)
+              destination.parent.mkdir(parents=True, exist_ok=True)
+              destination.write_bytes(archive.extractfile(member).read())
+          child = parent / 'mainframe-modernization'
+          expected = json.loads((child / 'PACKAGE_MANIFEST.json').read_text())['files']
+          for name, checksum in expected.items():
+              if hashlib.sha256((child / name).read_bytes()).hexdigest() != checksum: raise RuntimeError('Child integrity mismatch')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as out: out.write('ready=true\n')
+      - name: Commit only the requested folder; remove delivery transport
+        id: commit
+        if: steps.unpack.outputs.ready == 'true'
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm -r -- mainframe-modernization-framework/_delivery
+          git add -- mainframe-modernization-framework
+          git commit -m 'Materialize verified target-aware mainframe framework and playbook'
+          git push origin HEAD:mainframe-modernization-v2-verified-20260905
+          echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+  verify:
+    needs: materialize
+    if: needs.materialize.outputs.ready == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.materialize.outputs.commit }}
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.400'
+      - name: Verify all nine generated targets without cloud credentials
+        working-directory: mainframe-modernization-framework/mainframe-modernization
+        run: python -S workbench.py verify --matrix
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mainframe-v2-${{ matrix.os }}-evidence
+          path: mainframe-modernization-framework/mainframe-modernization/evidence/
+          retention-days: 7
