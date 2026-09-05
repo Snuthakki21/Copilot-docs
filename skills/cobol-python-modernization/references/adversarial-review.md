@@ -1,0 +1,25 @@
+# Adversarial Review Protocol
+
+Perform this after generation and normal tests. Assume no trust in the lineage or Python; source JCL/COBOL/copybooks/DB2/control cards are the evidence of record. The review is a parity review, not a refactoring review.
+
+## Accuracy rule: evidence only
+
+Every material statement in the review must be backed by concrete evidence that can be re-opened: source file/location, Python file/location, validating test/fixture, or reconciliation result. Do not infer missing behavior, root cause, intent, or impact from naming conventions, comments alone, common COBOL patterns, or what “usually” happens. If the evidence does not establish a conclusion, write `UNKNOWN — UNVERIFIED`, identify exactly what evidence is missing, record the item in `traceability.json.unsupported_claims` or `unresolved`, and block 100%. Never fill an evidence gap with a plausible explanation.
+
+Classify every conclusion as one of three types:
+- **Migration mismatch:** Python differs from proven source behavior. This is a defect and blocks 100%.
+- **Preserved legacy quirk:** source behavior looks suspicious/incorrect but Python reproduces it faithfully. Document it; do not repair it in this migration and do not count it as a migration defect.
+- **Unverified:** available evidence is insufficient to prove source behavior, Python equivalence, root cause, impact, or remediation. This blocks 100% until evidence resolves it.
+
+1. Rebuild the job step graph from source JCL independently. Compare step order, conditional execution, return codes, overrides, DDs, utilities, parameters, datasets, and scheduler-relevant semantics. Cite each source location used.
+2. For each program, re-read source and enumerate rules without consulting `job.py` first. Then map each rule to `lineage.md`, `job.py`, and tests. Missing, merged, split, reordered, weakened, or strengthened rules are migration mismatches unless source evidence proves equivalence.
+3. Where executable logic conflicts with comments, names, documentation, or apparent business intent, record the conflict and use executable source behavior as the parity expectation unless stronger source evidence resolves it.
+4. Reconcile all inputs/outputs: record layout, encoding, record length, delimiter/blocking, sort/collation, duplicate handling, headers/trailers, counts, file naming/GDG behavior, empty files, rejects, and partial-output behavior. Do not “normalize” odd source behavior during comparison.
+5. Reconcile DB behavior: SQL predicates, joins, cursor ordering, NULL indicators, SQLCODE branches, numeric precision/scale, timestamps, transaction boundaries, isolation/locking assumptions, commit frequency, rollback, duplicate keys, and DB2-specific semantics translated to SQLite/Oracle.
+6. Construct counterexamples around every branch/boundary: zero/one/max values, negative/signed values, precision boundaries, malformed records, missing optional fields, duplicate keys, first/last record, EOF, no rows/many rows, NULLs, date boundaries, restart after partial progress, and rerun after success. Expected results come from source behavior, including defects/quirks; if source evidence cannot establish an expected result, mark the case unverified rather than guessing.
+7. Compare SQLite/job outputs with independently source-derived expectations. Prefer exact row/file equality. Canonicalize only when source behavior proves ordering is immaterial; do not canonicalize away an ordering mismatch.
+8. Inspect generated Python for introduced differences: changed defaults, stricter validation, altered exceptions, reordered side effects, deduplication, changed rounding/truncation, implicit retries, added rollback/atomicity, changed commit frequency, altered return codes, or changed partial-write/restart behavior. “Better” behavior is still a migration mismatch when the source did something else.
+9. For every mismatch, state the root cause only if the compared evidence proves it. Otherwise write `Root cause: UNKNOWN — UNVERIFIED` and identify the next evidence/check required. Recommend a remediation only when it follows directly from proven source behavior and the demonstrated Python difference.
+10. Security review: identify path traversal, SQL injection, unsafe subprocess/deserialization/eval/exec, embedded secrets, sensitive logs, temp-file exposure, or unbounded resource risks. Remediation must preserve business behavior. If a security fix necessarily changes source behavior, record the conflict as unresolved and block 100% rather than silently choosing new semantics.
+11. Verify `run.jil` invokes exactly the tested command/configuration and preserves source-consistent success/failure behavior. Verify Oracle/SQLite DDL supports the Python behavior and source constraints.
+12. Re-run compilation, tests, coverage, scanners, and `scripts/modernization_tools.py`. Any open source/Python mismatch, unresolved behavior, unsupported claim, introduced security defect, failed test, or coverage below 80% blocks 100%. Preserved legacy quirks do not block parity by themselves.
