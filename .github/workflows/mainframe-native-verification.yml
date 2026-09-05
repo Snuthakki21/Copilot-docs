@@ -1,0 +1,56 @@
+name: Mainframe modernization native verification
+on:
+  push:
+    branches: [mainframe-modernization-v2]
+    paths: ['.mainframe-transfer/READY']
+permissions:
+  contents: write
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    outputs:
+      source_sha: ${{ steps.publish.outputs.source_sha }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Materialize only the reviewed public toolkit payload
+        run: python .mainframe-transfer/unpack.py
+      - name: Build editable presentation and package manifests
+        run: python mainframe-modernization-framework/mainframe-modernization/tools/build_release.py
+      - id: publish
+        name: Commit the materialized toolkit on its isolated branch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add mainframe-modernization-framework
+          git diff --cached --quiet || git commit -m 'Materialize the source-linked multi-target migration workbench'
+          git push origin HEAD:mainframe-modernization-v2
+          echo "source_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+  verify:
+    needs: materialize
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.materialize.outputs.source_sha }}
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Extract the exact archive and require all native compilers
+        run: python mainframe-modernization-framework/mainframe-modernization/tools/verify_release.py --require-native --destination ci-receipts
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: modernization-${{ matrix.os }}
+          path: ci-receipts/
+          if-no-files-found: error
