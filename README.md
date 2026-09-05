@@ -1,22 +1,21 @@
-# Copilot-docs
+# Mainframe modernization
 
-Both files are ready and tested. Here's exactly how to use them:
+This branch is reserved for the mainframe modernization framework. Unrelated document generators, presentation examples, marketing prompts, scratch files, and the abandoned upload workflow have been removed from its current file tree.
 
-**Step 1 — Drop `copilot-instructions.md` into your repo's `.github/` folder.** Copilot Chat reads this automatically and will now follow proper Word doc formatting rules in every conversation.
+## Start here
 
-**Step 2 — Copy `docgen.js` into any project where you need to generate a doc.** Then run once:
-```bash
-npm install docx
-```
+Read [the project handoff](mainframe-modernization-framework/CONTINUE_HERE.md) for the established requirements, target configuration, artifact identities, historical verification results, and unfinished work. The handoff is preserved byte-for-byte from commit `1627b2f8425500414ff58681ed24e79316923652`.
 
-**Step 3 — To generate a document:** Edit only the `CONFIG` block at the top and the `content` array in the middle. Add a comment describing what you want, and Copilot will autocomplete the sections for you. Then:
-```bash
-node docgen.js
-# → outputs output.docx
-```
+## Current delivery status
 
-The script includes ready-made helpers (`h1()`, `h2()`, `p()`, `bullet()`, `table()`, etc.) so Copilot has clean building blocks to work with rather than generating raw docx boilerplate from scratch — that's what was making it produce bad output before.
+**This revision contains project documentation only. The executable v2 framework, its ZIP, and its modernization PowerPoint have not been committed to this branch.** The branch name is not evidence of completed validation. No application tests were run by this cleanup.
 
-[View example output.docx](computer://C%3A%5CUsers%5Chighg%5CAppData%5CRoaming%5CClaude%5Clocal-agent-mode-sessions%5C71c693a2-1cf1-4fb0-845f-831e3e42983f%5Cfb6e76cb-a8c9-4fd3-af0c-1b808d2d9aa2%5Clocal_51e29465-0c68-4eb8-a1ff-2559bdf4a6fa%5Coutputs%5Coutput.docx)
-[View docgen.js](computer://C%3A%5CUsers%5Chighg%5CAppData%5CRoaming%5CClaude%5Clocal-agent-mode-sessions%5C71c693a2-1cf1-4fb0-845f-831e3e42983f%5Cfb6e76cb-a8c9-4fd3-af0c-1b808d2d9aa2%5Clocal_51e29465-0c68-4eb8-a1ff-2559bdf4a6fa%5Coutputs%5Cdocgen.js)
-[View copilot-instructions.md](computer://C%3A%5CUsers%5Chighg%5CAppData%5CRoaming%5CClaude%5Clocal-agent-mode-sessions%5C71c693a2-1cf1-4fb0-845f-831e3e42983f%5Cfb6e76cb-a8c9-4fd3-af0c-1b808d2d9aa2%5Clocal_51e29465-0c68-4eb8-a1ff-2559bdf4a6fa%5Coutputs%5Ccopilot-instructions.md)
+The existing archive to recover and publish is `Mainframe_Migration_Workbench_v2.zip` (521,452 bytes), SHA-256 `c2f93897b77676f823633c678aa95e8e5a4238e24657a54c6d813bcc32df363a`. Its identity was checked against the locally available archive during cleanup; that does not make it downloadable from this repository. Do not substitute an older package or invent a download URL.
+
+When publication is completed, keep operating prompts in `mainframe-modernization-framework/prompts/` and the self-contained work-laptop package in `mainframe-modernization-framework/mainframe-modernization/`. Those implementation directories are not present in this revision. Do not add empty executable stubs, encoded upload fragments, obsolete package versions, or workflows that depend on absent files.
+
+## Branch scope
+
+Cleanup applies only to `mainframe-modernization-v2-verified-20260905`. It is a normal commit with history preserved, not a force-push or purge. The previous branch tip was `5fb01c80d918a3e169797ea5e97a88f8d694f834`. No change to `main` or other branches is part of this cleanup.
+
+Do not merge this cleanup into `main` unless deleting the unrelated files there is also intended. This public branch is for the generic framework and synthetic examples, not bank source code, customer data, credentials, or real SME knowledge.
