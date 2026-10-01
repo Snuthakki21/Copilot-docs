@@ -1,8 +1,11 @@
 # Compact project memory
-Revision: 3. Target: BigQuery and Cloud Composer selected for the GCP candidate; complete architecture unapproved. Assess Java, Python or C#/.NET application language/runtime independently from orchestration, messaging and UI. State: not started.
+Revision: 4, Copilot/VS Code/Windows 11. Target: BigQuery and Cloud Composer selected for the GCP candidate; complete architecture unapproved. Assess Java, Python or C#/.NET application language/runtime independently from orchestration, messaging and UI. State: not started.
 
 ## Read first
-PROJECT.yaml defines scope and candidate/approved profiles. AGENTS.md defines operating contracts. Canonical state, decisions, dependencies and evidence live in .migration/ledger.sqlite, created during authorized initialization. The SQLite tracking ledger is independent of the target database. This file is only an index.
+PROJECT.yaml defines scope and candidate/approved profiles. docs/MIGRATION_CONTRACT.md defines operating contracts. Canonical state, decisions, dependencies and evidence live in .migration/ledger.sqlite, created during authorized initialization. The SQLite tracking ledger is independent of the target database. This file is only an index.
+
+## Copilot adaptation status
+VS Code Local on Windows 11 is confirmed. Native roles/skills, relevant automatic routing, exact prompts and project MCP/Zowe code are supplied. Use the final validation report to distinguish offline tests from unverified Windows/live connectivity. User-selected secrets live only in ignored local .env and public certs in certs; never place their contents in memory or model context. Db2 and Headroom MCP are included; incompatible standalone integrations were removed. Mainframe migration itself has not run.
 
 ## Current objective / next action
 Inventory the full configured GitHub Endevor-export folder and resolve the ordered jobs. Confirm missing scope/access inputs in one grouped question. Keep discovery and the source business specification target-neutral. Fill the required category coverage matrix from evidence; counts are unknown.

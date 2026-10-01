@@ -1,4 +1,5 @@
-revision: 3
+revision: 4-copilot-vscode
+source_revision: 3
 process_id: UNKNOWN
 repository_url_or_path: UNKNOWN
 endevor_export_folder: UNKNOWN
@@ -10,37 +11,42 @@ approved_db2_schemas: []
 approved_extraction_directory: UNKNOWN
 zowe_profile_alias: UNKNOWN_NO_SECRETS
 db2_mcp_alias: UNKNOWN_NO_SECRETS
-
 tracking:
   engine: SQLite
   path: .migration/ledger.sqlite
   purpose: MIGRATION_EVIDENCE_ONLY_NEVER_TARGET_APPLICATION_DATA
   schema_version: INITIALIZE_WITH_VERSIONED_MIGRATIONS
   runtime_sqlite_version: VERIFY
-
 source_category_coverage:
   supplied_table_scope: EIGHT_VISIBLE_CATEGORIES_ARE_COMPLETE_FOR_THIS_REVISION
   numeric_cells: UNKNOWN_UNTIL_MEASURED
   asterisk_note_meanings: UNAVAILABLE_DO_NOT_INFER_NOT_A_BLOCKER
   required_categories:
-    - Batch COBOL program
-    - 'JCL job*'
-    - JCL PROC
-    - Copybook / record layout
-    - CICS screen
-    - DB2 table
-    - 'CA7 schedules*'
-    - MQ interfaces
-  additional_required_coverage: [Utilities, Other discovered dependencies]
+  - Batch COBOL program
+  - JCL job*
+  - JCL PROC
+  - Copybook / record layout
+  - CICS screen
+  - DB2 table
+  - CA7 schedules*
+  - MQ interfaces
+  additional_required_coverage:
+  - Utilities
+  - Other discovered dependencies
   total_basis: UNIQUE_OBJECT_UNION_WITH_DECLARED_COUNTING_RULES
   initial_status: UNASSESSED
   not_applicable_requires: EVIDENCE_AND_NAMED_HUMAN_SCOPE_REVIEW
   canonical_matrix: LEDGER_CATEGORY_COVERAGE_VIEW
-
 target_selection:
   state: GCP_COMPONENTS_USER_SELECTED_ARCHITECTURE_UNAPPROVED
-  candidate_app_languages: [Java, Python, 'C# on .NET']
-  candidate_database_choices: [SQLite, Oracle, BigQuery]
+  candidate_app_languages:
+  - Java
+  - Python
+  - C# on .NET
+  candidate_database_choices:
+  - SQLite
+  - Oracle
+  - BigQuery
   selected_gcp_data_service: BigQuery
   selected_gcp_scheduler: Cloud Composer (Apache Airflow)
   requested_constraints: []
@@ -50,9 +56,6 @@ target_selection:
   all_combinations_supported: false
   neutral_discovery_can_proceed: true
   target_generation_requires: SME_APPROVAL_THEN_APPROVED_ARCHITECTURE_AND_EXPLICIT_SLICE_CONFIRMATION
-
-# Copy this shape into target_profiles only for an actually assessed candidate.
-# Fill independent choices from evidence; UNKNOWN is never approval or absence.
 target_profile_template:
   profile_id: ASSIGN_STABLE_ID
   profile_version: UNKNOWN
@@ -98,60 +101,57 @@ target_profile_template:
   technical_contract_review_id: UNKNOWN
   architecture_approval_id: UNKNOWN
   validation_environment_alias: UNKNOWN_NO_SECRETS
-  blocking_behaviors: [] # Empty means no entries recorded, not zero blockers verified.
+  blocking_behaviors: []
   not_applicable_decision_ids: []
-
 target_profiles:
-  - profile_id: gcp_bigquery_composer_candidate
-    profile_version: 1
-    profile_hash: COMPUTE_AFTER_ARCHITECTURE_ASSESSMENT
-    state: USER_SELECTED_COMPONENTS_PENDING_ARCHITECTURE_APPROVAL
-    app_language: UNCONFIRMED_JAVA_PYTHON_OR_CSHARP_DOTNET
-    application_runtime:
-      implementation: UNCONFIRMED_SEPARATE_FROM_COMPOSER_DAG_LANGUAGE
-      version: VERIFY
-      toolchain_version: VERIFY
-    database_storage:
-      engine_or_named_service: BigQuery
-      provider_and_hosting: Google Cloud
-      engine_dialect_edition: VERIFY_SELECTED_GOOGLESQL_CONFIGURATION
-      version_or_managed_capability_snapshot: VERIFY
-      driver_sdk_versions: []
-      workload_role: ASSESS_AGAINST_SOURCE_TRANSACTIONAL_AND_ANALYTICAL_REQUIREMENTS
-      approved_environment_alias: UNKNOWN_NO_SECRETS
-      application_database_path_or_alias: UNKNOWN_PROJECT_DATASET_ALIAS_NO_SECRETS
-      file_object_storage: UNASSESSED
-    deployment:
-      platform: Google Cloud
-      execution_runtime_or_service: UNCONFIRMED_FOR_APPLICATION_WORKLOADS
-      version_or_managed_capability_snapshot: VERIFY
-      topology_region_resource_constraints: []
-    scheduler_orchestration:
-      choice: Cloud Composer (Apache Airflow)
-      dag_language: Python
-      version_or_managed_capability_snapshot: VERIFY_COMPOSER_AIRFLOW_PROVIDER_VERSIONS
-      workload_execution: ASSESSED_APPROVED_OPERATOR_AND_SEPARATE_RUNTIME_REQUIRED
-      contract_id: UNKNOWN
-    messaging_integration:
-      choice: UNASSESSED_PUBSUB_NOT_IMPLICITLY_SELECTED
-      version_or_managed_capability_snapshot: VERIFY
-      contract_id: UNKNOWN
-    ui:
-      choice: UNASSESSED
-      version: VERIFY
-      contract_id: UNKNOWN
-    interface_contract_id_version_hash: UNKNOWN
-    source_spec_id_version_hash: UNKNOWN
-    compatibility_assessment_id: UNKNOWN
-    approved_scope_and_limitations: []
-    security_cost_operations_decision_ids: []
-    technical_contract_review_id: UNKNOWN
-    architecture_approval_id: UNKNOWN
-    validation_environment_alias: UNKNOWN_NO_SECRETS
-    blocking_behaviors: [] # Unassessed, not an assertion that no blockers exist.
-    not_applicable_decision_ids: []
-
-# Optional starting candidate, not selected or authorized by this configuration.
+- profile_id: gcp_bigquery_composer_candidate
+  profile_version: 1
+  profile_hash: COMPUTE_AFTER_ARCHITECTURE_ASSESSMENT
+  state: USER_SELECTED_COMPONENTS_PENDING_ARCHITECTURE_APPROVAL
+  app_language: UNCONFIRMED_JAVA_PYTHON_OR_CSHARP_DOTNET
+  application_runtime:
+    implementation: UNCONFIRMED_SEPARATE_FROM_COMPOSER_DAG_LANGUAGE
+    version: VERIFY
+    toolchain_version: VERIFY
+  database_storage:
+    engine_or_named_service: BigQuery
+    provider_and_hosting: Google Cloud
+    engine_dialect_edition: VERIFY_SELECTED_GOOGLESQL_CONFIGURATION
+    version_or_managed_capability_snapshot: VERIFY
+    driver_sdk_versions: []
+    workload_role: ASSESS_AGAINST_SOURCE_TRANSACTIONAL_AND_ANALYTICAL_REQUIREMENTS
+    approved_environment_alias: UNKNOWN_NO_SECRETS
+    application_database_path_or_alias: UNKNOWN_PROJECT_DATASET_ALIAS_NO_SECRETS
+    file_object_storage: UNASSESSED
+  deployment:
+    platform: Google Cloud
+    execution_runtime_or_service: UNCONFIRMED_FOR_APPLICATION_WORKLOADS
+    version_or_managed_capability_snapshot: VERIFY
+    topology_region_resource_constraints: []
+  scheduler_orchestration:
+    choice: Cloud Composer (Apache Airflow)
+    dag_language: Python
+    version_or_managed_capability_snapshot: VERIFY_COMPOSER_AIRFLOW_PROVIDER_VERSIONS
+    workload_execution: ASSESSED_APPROVED_OPERATOR_AND_SEPARATE_RUNTIME_REQUIRED
+    contract_id: UNKNOWN
+  messaging_integration:
+    choice: UNASSESSED_PUBSUB_NOT_IMPLICITLY_SELECTED
+    version_or_managed_capability_snapshot: VERIFY
+    contract_id: UNKNOWN
+  ui:
+    choice: UNASSESSED
+    version: VERIFY
+    contract_id: UNKNOWN
+  interface_contract_id_version_hash: UNKNOWN
+  source_spec_id_version_hash: UNKNOWN
+  compatibility_assessment_id: UNKNOWN
+  approved_scope_and_limitations: []
+  security_cost_operations_decision_ids: []
+  technical_contract_review_id: UNKNOWN
+  architecture_approval_id: UNKNOWN
+  validation_environment_alias: UNKNOWN_NO_SECRETS
+  blocking_behaviors: []
+  not_applicable_decision_ids: []
 optional_reference_profile:
   profile_id: python_sqlite_local_reference
   state: OPTIONAL_UNASSESSED_NOT_SELECTED
@@ -164,7 +164,6 @@ optional_reference_profile:
   scheduler_messaging_ui: UNASSESSED_FROM_SOURCE_REQUIREMENTS
   compatibility_and_architecture_approval_required: true
   proves_parity_for_other_profiles: false
-
 sme_reviewer: UNKNOWN
 code_reviewer: UNKNOWN
 architecture_approver: USER
@@ -172,15 +171,54 @@ implementation_approver: USER
 source_data_policy: metadata/source first; approved masked samples only
 source_execution_authorized: false
 source_mutation_authorized: false
-# Entries must link exact user approval, slice/spec/profile/interface versions,
-# scope limitations and authorized milestone; config alone cannot grant approval.
 implementation_authorized_slices: []
 release_authorized: false
 cloud_provisioning_authorized: false
-max_active_specialists: 1
-suggested_segment_substantive_lines: [30, 100]
+max_active_specialists: 2
+suggested_segment_substantive_lines:
+- 30
+- 100
 size_band_thresholds: UNRATED_PENDING_INVENTORY_AND_AGREEMENT
 per_work_unit_token_budget: AGREE_OR_USE_PLATFORM_LIMIT
 progress_max_words: 150
 milestone: INVENTORY_AND_SME_REVIEW
 notes: Configuration records actual instructions; it never grants permission by itself.
+copilot_adaptation:
+  delivery_shape: REPOSITORY_ROOT_OVERLAY
+  client: VSCODE_LOCAL_CONFIRMED_FROM_USER_AND_SCREENSHOT
+  runtime_verification: MOCK_AND_STATIC_TESTS_REQUIRED_LIVE_CONNECTION_NOT_VERIFIED
+  agent_directory: .github/agents
+  skill_directory: .github/skills
+  canonical_document_directory: .
+  tools_policy: APPROVED_MCP_SERVERS_AND_EXISTING_ZOWE_NO_SILENT_INSTALLATION
+  tool_restrictions: BEHAVIORAL_GUIDANCE_PLUS_SERVER_CONTROLS_NOT_UNIVERSAL_CLIENT_SANDBOX
+  prompt_files: .github/prompts (VS Code Local convenience; skill/picker fallback)
+  routing: AUTOMATIC_RELEVANT_SKILL_SELECTION_WITH_HUMAN_GATES
+  credential_file: .env (untracked; never reveal to model)
+  certificate_directory: certs (untracked contents)
+  mcp_config: .vscode/mcp.json
+  included_mcp_servers:
+  - db2Zos
+  - headroom
+  connection_prerequisites: Fill .env locally; supply certs; provision approved Python/IBM
+    driver/MCP dependencies; validate before starting
+  workspace_os: WINDOWS_11
+  required_mcp_tools:
+    db2Zos:
+    - db2_allowed_scope
+    - db2_list_tables
+    - db2_describe_table
+    - db2_read_rows
+    headroom:
+    - headroom_compress
+    - headroom_retrieve
+    - headroom_stats
+model_guidance:
+  default_model: GPT-5.5
+  default_effort: High
+  routine_model: GPT-5.4 mini
+  routine_effort: Medium
+  independent_review_model: Claude Opus 4.8
+  independent_review_effort: High if offered
+  hard_case_effort: Extra High only if offered and justified
+  model_overrides_written: false

@@ -1,0 +1,4 @@
+# Install explicitly into the project .venv; no installation occurs at runtime.
+mcp==1.29.0
+python-dotenv==1.2.2
+jsonschema==4.26.0

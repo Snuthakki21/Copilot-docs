@@ -1,0 +1,2 @@
+# Install only through your approved MCP dependency process; launch never installs.
+headroom-ai[mcp]==0.39.1
