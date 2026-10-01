@@ -1,0 +1,30 @@
+revision: 2
+process_id: UNKNOWN
+repository_url_or_path: UNKNOWN
+endevor_export_folder: UNKNOWN
+baseline_commit: RESOLVE_AND_FREEZE
+ordered_jobs: []
+source_environment: UNKNOWN
+approved_dataset_prefixes: []
+approved_db2_schemas: []
+approved_extraction_directory: UNKNOWN
+zowe_profile_alias: UNKNOWN_NO_SECRETS
+db2_mcp_alias: UNKNOWN_NO_SECRETS
+runtime_python_version: VERIFY
+runtime_sqlite_version: VERIFY
+application_sqlite_path: UNKNOWN_SEPARATE_FROM_TRACKING_LEDGER
+sme_reviewer: UNKNOWN
+code_reviewer: UNKNOWN
+implementation_approver: USER
+source_data_policy: metadata/source first; approved masked samples only
+source_execution_authorized: false
+source_mutation_authorized: false
+implementation_authorized_slices: []
+release_authorized: false
+max_active_specialists: 1
+suggested_segment_substantive_lines: [30, 100]
+size_band_thresholds: UNRATED_PENDING_INVENTORY_AND_AGREEMENT
+per_work_unit_token_budget: AGREE_OR_USE_PLATFORM_LIMIT
+progress_max_words: 150
+milestone: INVENTORY_AND_SME_REVIEW
+notes: Configuration records actual instructions; it never grants permission by itself.
