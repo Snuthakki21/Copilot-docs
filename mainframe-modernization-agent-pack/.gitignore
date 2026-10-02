@@ -1,0 +1,31 @@
+# Local secrets, trust material, source evidence and runtime data
+.env
+.env.*
+!.env.example
+certs/*
+!certs/.gitkeep
+.migration/
+.venv/
+.venv-headroom/
+__pycache__/
+*.py[cod]
+zowe.config.user.json
+zowe.config.json
+zowe.schema.json
+*.key
+*.p12
+*.pfx
+*.jks
+
+# Trust/credential containers are never publication material.
+*.cer
+*.crt
+*.pem
+*.kdb
+*.sth
+*.keystore
+*.lic
+!tools/db2_zos_mcp/tests/fixtures/test-only-ca.pem
+
+.headroom/
+.cache/

@@ -1,0 +1,3 @@
+# Separate, explicit IBM prerequisite. Use the approved official wheel.
+# Its bundled CLI must pass local db2level >= 11.5.6 preflight.
+ibm_db==3.3.0

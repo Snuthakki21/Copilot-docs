@@ -1,0 +1,22 @@
+{
+  "servers": {
+    "db2Zos": {
+      "type": "stdio",
+      "command": "${workspaceFolder}/.venv/Scripts/python.exe",
+      "args": [
+        "${workspaceFolder}/tools/db2_zos_mcp/server.py",
+        "--project-root",
+        "${workspaceFolder}"
+      ],
+      "cwd": "${workspaceFolder}"
+    },
+    "headroom": {
+      "type": "stdio",
+      "command": "${workspaceFolder}/.venv-headroom/Scripts/python.exe",
+      "args": [
+        "${workspaceFolder}/tools/headroom_stdio.py"
+      ],
+      "cwd": "${workspaceFolder}"
+    }
+  }
+}
