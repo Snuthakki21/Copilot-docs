@@ -1,0 +1,28 @@
+Metric,Value
+process_id,example-referral
+demo,False
+source_programs,1
+source_copybooks,1
+source_bms_screens,0
+source_cics_transactions,Unknown
+source_db2_table_references,0
+source_vsam_files,Unknown
+inbound_interfaces,Unknown
+outbound_interfaces,Unknown
+target_python_programs,1
+target_react_business_screens,0
+target_business_rest_apis,0
+source_code_loc,39
+source_physical_loc,39
+target_program_code_loc,25
+rules_documented,4
+rules_verified,4
+known_rule_verification_percent,100.0
+synthetic_cases,256
+matching_cases,256
+unresolved_blockers,0
+unsupported_source_lines,0
+observed_mainframe_parity,False
+evidence_basis,SOURCE_DERIVED_EXPECTED
+verification_percent_denominator,Extracted known rules only; unsupported and unknown rules are not silently excluded from completion gates.
+target_environment,Non-production Python / SQLite; JSON record adapter

@@ -1,0 +1,60 @@
+{
+  "blockers": [],
+  "created": "2026-10-03T15:06:07.641610+00:00",
+  "lineage": [
+    {
+      "from": "REFJOB.CHECK",
+      "inputs": [
+        "CUSTOMER",
+        "REFERRAL"
+      ],
+      "kind": "calls",
+      "outputs": [
+        "RESULT"
+      ],
+      "to": "ELIGIBLE"
+    },
+    {
+      "from": "ELIGIBLE",
+      "kind": "copybook",
+      "to": "LAYOUT"
+    }
+  ],
+  "metrics": {
+    "demo": false,
+    "evidence_basis": "SOURCE_DERIVED_EXPECTED",
+    "inbound_interfaces": null,
+    "known_rule_verification_percent": 100.0,
+    "matching_cases": 256,
+    "observed_mainframe_parity": false,
+    "outbound_interfaces": null,
+    "process_id": "example-referral",
+    "rules_documented": 4,
+    "rules_verified": 4,
+    "source_bms_screens": 0,
+    "source_cics_transactions": null,
+    "source_code_loc": 39,
+    "source_copybooks": 1,
+    "source_db2_table_references": 0,
+    "source_physical_loc": 39,
+    "source_programs": 1,
+    "source_vsam_files": null,
+    "synthetic_cases": 256,
+    "target_business_rest_apis": 0,
+    "target_environment": "Non-production Python / SQLite; JSON record adapter",
+    "target_program_code_loc": 25,
+    "target_python_programs": 1,
+    "target_react_business_screens": 0,
+    "unresolved_blockers": 0,
+    "unsupported_source_lines": 0,
+    "verification_percent_denominator": "Extracted known rules only; unsupported and unknown rules are not silently excluded from completion gates."
+  },
+  "portfolio": {
+    "completed_processes": 0,
+    "demo_excluded": true,
+    "processes": 1,
+    "program_memberships": 1,
+    "unique_copybook_versions": 1,
+    "unique_program_versions": 1
+  }
+}
