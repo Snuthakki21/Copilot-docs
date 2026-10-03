@@ -1,27 +1,38 @@
 import base64
 import json
 import tempfile
-import threading
+import socket
+import subprocess
+import sys
 import time
 import unittest
 import urllib.request
 import urllib.error
 from io import BytesIO
 from openpyxl import load_workbook
-from workbench.__main__ import make_server
+from workbench.coordinator import Coordinator
 
 class HttpTests(unittest.TestCase):
     def test_one_click_review_return_and_automatic_report(self):
         with tempfile.TemporaryDirectory() as root:
-            server,c=make_server(root,0);thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start();c.launch_worker()
-            url=f'http://127.0.0.1:{server.server_port}'
+            with socket.socket() as listener:
+                listener.bind(('127.0.0.1',0));port=listener.getsockname()[1]
+            url=f'http://127.0.0.1:{port}'
+            service=subprocess.Popen([sys.executable,'-m','workbench','--root',root,'--port',str(port)],stdout=subprocess.PIPE,stderr=subprocess.PIPE)
             try:
                 def get(path):return urllib.request.urlopen(url+path,timeout=10).read()
-                state=json.loads(get('/api/state'));token=state['token']
+                until=time.monotonic()+15
+                while True:
+                    try:state=json.loads(get('/api/state'));break
+                    except (urllib.error.URLError,ConnectionError):
+                        if service.poll() is not None or time.monotonic()>until:
+                            self.fail('Uvicorn startup failed: '+str(service.communicate(timeout=5)))
+                        time.sleep(.05)
+                token=state['token']
                 def post(path,payload):
                     q=urllib.request.Request(url+path,data=json.dumps(payload).encode(),headers={'Content-Type':'application/json','Origin':url,'X-Workbench-Token':token});return json.load(urllib.request.urlopen(q,timeout=10))
                 def wait_for(pid,statuses):
-                    until=time.monotonic()+10
+                    until=time.monotonic()+45
                     while time.monotonic()<until:
                         p=next(x for x in json.loads(get('/api/state'))['processes'] if x['id']==pid)
                         if p['status'] in statuses:return p
@@ -35,6 +46,11 @@ class HttpTests(unittest.TestCase):
                 self.assertTrue(get('/api/process/'+pid+'/artifact?path=reports/report-0001/management.pptx').startswith(b'PK'))
                 self.assertEqual(json.loads(get('/api/state'))['portfolio']['processes'],0)
                 with self.assertRaises(urllib.error.HTTPError):post('/api/process/'+pid+'/answers',{'xlsx':base64.b64encode(out.getvalue()).decode(),'reviewer':'Fictional reviewer'})
-            finally:server.shutdown();server.server_close();thread.join();c.close()
+            finally:
+                service.terminate()
+                try:service.communicate(timeout=10)
+                except subprocess.TimeoutExpired:service.kill();service.communicate(timeout=5)
+                # Lifespan shutdown releases the same-workspace single-writer lock.
+                recovered=Coordinator(root);recovered.close()
 
 if __name__=='__main__':unittest.main()

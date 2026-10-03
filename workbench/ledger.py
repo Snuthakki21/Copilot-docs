@@ -18,12 +18,16 @@ class Ledger:
         require(not state.is_symlink(), 'Unsafe ledger path')
         state.mkdir(exist_ok=True)
         self.lock = threading.RLock()
+        require(not (state/'ledger.sqlite').is_symlink(), 'Unsafe ledger database path')
         self.db = sqlite3.connect(state/'ledger.sqlite', check_same_thread=False, timeout=10)
-        self.db.row_factory = sqlite3.Row
-        self.db.execute('PRAGMA foreign_keys=ON')
-        # Rollback journaling avoids dependence on a newer WAL-reset bug fix or network-filesystem assumptions.
-        self.db.execute('PRAGMA journal_mode=DELETE')
-        self.db.executescript(Path(__file__).with_name('schema.sql').read_text())
+        try:
+            self.db.row_factory = sqlite3.Row
+            self.db.execute('PRAGMA foreign_keys=ON')
+            # Rollback journaling avoids WAL-reset bugs and filesystem assumptions.
+            self.db.execute('PRAGMA journal_mode=DELETE')
+            self.db.executescript(Path(__file__).with_name('schema.sql').read_text())
+        except Exception:
+            self.db.close();raise
 
     def create(self, manifest, demo=False):
         pid = identity(manifest['id'])
@@ -88,7 +92,24 @@ class Ledger:
         return [json.loads(r[0]) for r in rows]
 
     def snapshot(self, pid, document):
-        with self.lock, self.db: self.db.execute('INSERT INTO snapshots(process_id,document,created) VALUES(?,?,?)',(pid,encode(document).decode(),now()))
+        canonical=encode(document).decode()
+        with self.lock, self.db:
+            existing=self.db.execute('SELECT 1 FROM snapshots WHERE process_id=? AND document=?',(pid,canonical)).fetchone()
+            if not existing:self.db.execute('INSERT INTO snapshots(process_id,document,created) VALUES(?,?,?)',(pid,canonical,now()))
+
+    def complete_report(self, doc, metrics):
+        """Commit accepted history, report certification and terminal event together."""
+        pid=identity(doc['id'])
+        canonical={k:v for k,v in doc.items() if k not in {'status','packet_issued','packet_imported','packet_hash','created','updated'}}
+        metric_text=encode(metrics).decode()
+        status='COMPLETED_WITH_BLOCKERS' if doc['blockers'] else 'COMPLETED'
+        with self.lock, self.db:
+            require(self.db.execute('SELECT 1 FROM processes WHERE id=?',(pid,)).fetchone(),'Process not found')
+            if not self.db.execute('SELECT 1 FROM snapshots WHERE process_id=? AND document=?',(pid,metric_text)).fetchone():
+                self.db.execute('INSERT INTO snapshots(process_id,document,created) VALUES(?,?,?)',(pid,metric_text,now()))
+            self.db.execute('UPDATE processes SET document=?,status=?,updated=? WHERE id=?',(encode(canonical).decode(),status,now(),pid))
+            self.db.execute('INSERT INTO events(process_id,stage,message,payload,created) VALUES(?,?,?,?,?)',(pid,'complete','Report inspection passed; technical completion recorded for the stated source-derived POC boundary',encode({}).decode(),now()))
+        return self.get(pid)
 
     def history(self, pid=None):
         with self.lock: rows = self.db.execute('SELECT * FROM snapshots WHERE process_id=? OR ? IS NULL ORDER BY seq',(pid,pid)).fetchall()

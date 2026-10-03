@@ -37,11 +37,14 @@ def make_server(root,port=8765):
     return server,app.state.coordinator
 
 def serve(root,port=8765):
-    server,c=make_server(root,port);origin=f'http://127.0.0.1:{server.server_port}'
-    c.launch_worker();print('Workbench: '+origin,flush=True)
-    try:server.serve_forever()
-    except KeyboardInterrupt:pass
-    finally:server.server_close();c.close()
+    # Production transport uses Uvicorn; make_server is only a bounded HTTP test fixture.
+    from .domain import require
+    require(1<=port<=65535,'Port must be 1..65535')
+    try:import uvicorn
+    except ImportError as exc:raise SystemExit('Run scripts/Setup.ps1 or scripts/setup.sh to install the locked server dependencies') from exc
+    app=create_app(root,f'http://127.0.0.1:{port}')
+    print(f'Workbench: http://127.0.0.1:{port}',flush=True)
+    uvicorn.run(app,host='127.0.0.1',port=port,access_log=False,log_level='warning')
 
 if __name__=='__main__':
     p=argparse.ArgumentParser();p.add_argument('--root',default=str(Path.cwd()));p.add_argument('--port',type=int,default=8765);args=p.parse_args();serve(args.root,args.port)

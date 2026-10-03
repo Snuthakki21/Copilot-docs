@@ -1,8 +1,8 @@
-> Execution boundary for this release: the master prompt below is the full desired contract. See `MIGRATION_CONTRACT.md` for implemented capabilities and remaining gaps. The runnable POC supports a bounded flat COBOL subset; it does not claim universal conversion or observed mainframe parity. Start with `../START_HERE.md`.
+> This is the design and extension contract for the existing workbench. Execute `../prompts/START_MODERNIZATION.md` for an ordinary process; use the existing Coordinator and do not create another engine. See `MIGRATION_CONTRACT.md` for implemented capabilities and remaining gaps. The runnable POC supports a bounded flat COBOL subset; it does not claim universal conversion or observed mainframe parity. Start with `../START_HERE.md`.
 
 # Mainframe modernization UI — complete replacement master prompt
 
-Revised 3 October 2026 for one-start automation, one SME review round per process, source-derived synthetic testing, job/step orchestration, and required PowerPoint completion. This file contains a short design review followed by the complete prompt to give an editing-capable coding agent. A companion `synthetic-data-kit.zip` contains a runnable contract-driven generator and fictional example. The full workbench has not been built, and no real business process has been converted in this conversation.
+Revised 3 October 2026 for one-start automation, one SME review round per process, source-derived synthetic testing, job/step orchestration, and required PowerPoint completion. This file contains a short design review followed by the complete prompt to give an editing-capable coding agent. The React/Python workbench, durable ledger, source-grounded generator, coverage exports, SME import and report gates are implemented for the bounded profile in `MIGRATION_CONTRACT.md`. Runnable scripts are `../tools/synthetic_cases.py` and `../tools/demo_e2e.py`. No real business process or live mainframe connection has been certified here.
 
 ## What changed and why
 
@@ -48,13 +48,13 @@ This was a code and specification review, not a fresh execution of the baseline 
 
 ## How to use the prompt
 
-Open an approved working folder or checkout in an editing-capable coding agent. Paste everything between BEGIN MASTER PROMPT and END MASTER PROMPT. If using Plan mode, obtain the plan first; authorize implementation in an editing-capable session afterward. Keep credentials out of chat. The prompt authorizes building the POC software within the selected workspace, not production operations, publication, or fabricated migration approvals.
+For process execution, use `../prompts/START_MODERNIZATION.md` and provide manifest/workspace paths. Repository AGENTS, CLAUDE and Copilot instructions link to that single workflow and `WORKSPACE_LAYOUT.md`. To add unsupported adapters, use the contract below in the existing repository; extend audited components and tests without replacing the engine. Keep credentials out of chat. The prompt authorizes building the POC software within the selected workspace, not production operations, publication, or fabricated migration approvals.
 
 ---
 
 ## BEGIN MASTER PROMPT
 
-You are building a working, local **Mainframe Modernization Workbench POC** on Windows 11. Extend the existing mainframe modernization agent pack into an operator UI with a real backend, durable workflow, source discovery, LLM-assisted analysis, offline SME review, Python/SQLite target generation, lineage, verification, and editable PowerPoint reporting.
+You are maintaining and extending the existing local **Mainframe Modernization Workbench POC**. Read AGENTS.md, CLAUDE.md, prompts/START_MODERNIZATION.md, docs/WORKSPACE_LAYOUT.md and docs/MIGRATION_CONTRACT.md. Use the existing Coordinator, ledger, UI, CLI, source-derived generator and report gates. Add audited adapters for unsupported requirements; do not create a competing engine or overwrite immutable evidence.
 
 Produce actual application code, database migrations, templates, automated checks, documentation, and a runnable synthetic demonstration. Do not stop at a UI mockup, architecture description, Markdown agents, or simulated progress. Distinguish software implemented, offline behavior tested, Windows behavior tested, live integrations verified, and real process acceptance. Missing live credentials or source baselines must not prevent building independently testable software; they must prevent unsupported live-success claims.
 

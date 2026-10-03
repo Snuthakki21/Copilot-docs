@@ -1,0 +1,18 @@
+# Automation and full source accountability revision
+
+Binding user requirements: fix known issues; every source line/file in the selected mainframe process must receive a conversion disposition and evidence/reason; specifically identify justified platform replacements; perform adversarial review; provide a plug-and-play Start command and agent prompt, with automatic execution after configured inputs and the one SME return. No mainframe writes or executions. No invented parity or zero-bug guarantee.
+
+1. Source accountability: JSON/CSV/XLSX/HTML inventory and source-order rows for COBOL, copybooks, JCL, BMS, SQL and unrecognized exports. Include original span, stable unit ID, target/version/span, tests, reason, replacement and evidence. Unsupported is never labelled mainframe-specific by default. Completion requires full accounting and verified applicable behavior. Denominators expose blocked/unknown/out-of-scope units.
+2. Runtime reliability: checkpoint-aware Pause/Cancel, cancellation report, safe durable stage retry, idempotent report history, crash/restart validation and required output integrity. Automated bounded retries of transient failures without bypassing verification. Runtime adversarial checks must cover all supported rules rather than only the first predicate.
+3. Review and packaging: bind returned workbook Context to the frozen packet; remove stale unbuilt status and fix LOC reporting; lock all Python dependencies with verified package hashes and bootstrap with preflight diagnostics.
+4. Agent operation: same service-backed CLI for Start/run/resume/import/status; one documented prompt and AGENTS/CLAUDE entrypoints. Start accepts a manifest and local Endeavor export, returns one packet and waits, resumes automatically after a returned workbook is placed/imported. Never synthesizes SME approval. Final bundles include coverage, target, synthetic comparisons and management PPT.
+5. Independent source audit and review: reproduce and fix additional parser/oracle/template/connector integrity failures, then fresh whole-branch adversarial review; regression tests must fail before fixes and pass afterward.
+6. UI and publication: show coverage, unmet gates and cancel controls; perform full unit/HTTP/CLI/demo checks; rebuild assets; publish a fast-forward update to the existing new workbench branch and verify every remote blob and the clean tree.
+
+Ownership: coverage/report module; coordinator runtime; review/packaging; agent runner; source semantic audit are disjoint work areas. Root owns API/UI/docs/publication. Interface changes are reported before integration. Shared report/coordinator contract: generated report paths registered by the coordinator, coverage builder accepts the pinned analysis/document and root.
+
+Ruling: implementers may work concurrently only on explicitly disjoint files; all integration and remote mutations remain sequential. This avoids merge conflicts while reducing elapsed time.
+
+## Execution result
+
+All six revision work areas were implemented. Independent review reproduced and closed additional manifest, SQLite, long-review, unknown-dialect, failed-Pause, portfolio, legacy-upgrade and diagnostic-download issues. The UI has one-click intake/start, exact UTF-8 file handling, source coverage and durable controls. Copilot/Claude use one shared execution prompt, with core folder enforcement. Sample evidence is grouped per process. VALIDATION.md records the final integrated suite/build/transport/example and rendering results. Remaining platform/live/unsupported capability boundaries are explicit, not deferred known fixes.

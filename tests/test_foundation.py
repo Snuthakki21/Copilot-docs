@@ -18,6 +18,13 @@ MANIFEST = '''# Referral process
 
 
 class FoundationTests(unittest.TestCase):
+    def test_portable_identity_and_paths_reject_device_names_and_control_characters(self):
+        from workbench.domain import identity
+        for name in ('CON','NUL','com1','LPT9'):
+            with self.subTest(name=name),self.assertRaises(ValidationError):identity(name)
+        with tempfile.TemporaryDirectory() as t:
+            for path in ('source\x00.cbl','bad\nname.cbl','folder/NUL.cpy','file.cbl.','trailing '):
+                with self.subTest(path=path),self.assertRaises(ValidationError):safe_path(t,path)
     def test_manifest_preserves_order_and_conditions(self):
         p = parse_manifest(MANIFEST)
         self.assertEqual(p['id'], 'poc-001')

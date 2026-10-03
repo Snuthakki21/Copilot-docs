@@ -10,6 +10,7 @@ from io import BytesIO
 
 MAX_UPLOAD = 8 * 1024 * 1024
 ID = re.compile(r'^[a-zA-Z][a-zA-Z0-9_-]{0,79}$')
+DEVICES = {'CON','PRN','AUX','NUL',*(f'COM{i}' for i in range(1,10)),*(f'LPT{i}' for i in range(1,10))}
 
 
 class ValidationError(ValueError):
@@ -22,14 +23,17 @@ def require(condition, message):
 
 def identity(value):
     require(isinstance(value, str) and ID.fullmatch(value), 'Use an ID beginning with a letter and containing letters, numbers, hyphens or underscores.')
+    require(value.upper() not in DEVICES,'Use a portable ID; Windows device names are reserved')
     return value
 
 
 def safe_path(root, relative):
     root = Path(root).resolve()
     require(isinstance(relative, str) and relative and '\\' not in relative and ':' not in relative, 'Invalid relative path')
+    require(not any(ord(c)<32 or c in '<>"|?*' for c in relative),'Path contains unsupported control or platform-reserved characters')
     rel = Path(relative)
     require(not rel.is_absolute() and '..' not in rel.parts, 'Path must remain inside its process directory')
+    require(all(not p.endswith(('.', ' ')) and p.split('.')[0].upper() not in DEVICES for p in rel.parts),'Path uses a reserved or ambiguous platform filename')
     candidate = root / rel
     require(not any(p.is_symlink() for p in [candidate, *candidate.parents] if p != root.parent), 'Symlink paths are not accepted')
     require(candidate.resolve().is_relative_to(root), 'Path escapes its directory')

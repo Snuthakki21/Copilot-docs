@@ -4,7 +4,7 @@ def run_job_refjob(context, programs):
     previous_rc = 0
     if True:
         result = programs['ELIGIBLE'](context['record'])
-        results.append({'step': 'CHECK', 'version': '53fcfed5bff8aa5e0c89d77b4e65d9638b7b0acd5a20db95913a1bccc21d0587'} | result)
+        results.append({'step': 'CHECK', 'version': 'd3ee5b44a3fa4e38821cffd8fccd948b80f52e392c69a61c108792206ce67f1f'} | result)
         previous_rc = result['return_code']
         context['record'] = result['record']
     else:

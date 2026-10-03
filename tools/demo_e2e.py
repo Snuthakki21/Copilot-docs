@@ -14,7 +14,10 @@ def run(root):
     c=Coordinator(root)
     try:
         for pid in ['example-referral','example-reuse']:
-            c.create(manifest.replace('example-referral',pid),sources,False)
+            doc=c.create(manifest.replace('example-referral',pid),sources,False)
+            # Counting is intentionally exercised in this isolated fixture workspace;
+            # carry an explicit disclosure into every generated presentation slide.
+            doc['fixture_only']=True;c.ledger.save(doc)
             c.start(pid);c.advance(pid)
             book=load_workbook(c.artifact(pid,'review/sme-checklist.xlsx'))
             for row in book['Checklist'].iter_rows(min_row=2):row[4].value='Yes';row[6].value='Fictional fixture reviewer'

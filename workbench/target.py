@@ -1,5 +1,6 @@
 """Generate auditable Python from a constrained source IR, not arbitrary LLM code."""
 import ast
+import re
 from .domain import require, sha
 
 
@@ -12,7 +13,7 @@ def expression(node):
 
 def emit_program(program):
     require(not program['blockers'], 'Unsupported program cannot receive a complete executable translation')
-    lines=['# Generated from source SHA256 '+program['source_hash'], '# Evidence class: SOURCE_DERIVED_EXPECTED', 'def run_program(record):','    row = dict(record)','    trace = []']
+    lines=['# Generated from source SHA256 '+program['source_hash'], '# Evidence class: SOURCE_DERIVED_EXPECTED', '# Semantic/dependency SHA256 '+program.get('semantic_hash',program['source_hash']), 'def run_program(record):','    row = dict(record)','    trace = []']
     for rule in program['rules']:
         lines.append('    if '+expression(rule['predicate'])+':')
         for effect in rule['then']:lines.append('        row['+repr(effect['field'])+'] = '+repr(effect['value']))
@@ -49,12 +50,19 @@ def run_generated(code, record):
 
 def emit_jobs(manifest, program_versions):
     lines=['# Generated ordered orchestration. Program implementations are shared and version-pinned.']
+    method_names=set()
     for job in manifest['jobs']:
+        require(isinstance(job['name'],str) and re.fullmatch(r'[A-Za-z][A-Za-z0-9_-]{0,79}',job['name']), 'Invalid job identifier')
         name=job['name'].lower().replace('-','_')
+        require(name not in method_names,'Job names collide after Python normalization')
+        method_names.add(name)
         lines += ['def run_job_'+name+'(context, programs):','    results = []','    previous_rc = 0']
         for step in job['steps']:
-            condition=step['condition'].upper().replace(' ','')
-            cond='True' if condition in ('ALWAYS','') else condition.replace('RC','previous_rc').replace('=','==') if condition.startswith('RC=') else condition.replace('RC','previous_rc')
+            condition=step['condition'].strip().upper()
+            match=re.fullmatch(r'RC\s*(<=|>=|=|<|>)\s*(\d{1,5})',condition)
+            require(condition in ('ALWAYS','') or match is not None,'Unsupported job return-code condition')
+            require(step['program'].upper() in program_versions,'Missing version-pinned program')
+            cond='True' if condition in ('ALWAYS','') else 'previous_rc '+('==' if match[1]=='=' else match[1])+' '+str(int(match[2]))
             lines+=['    if '+cond+':',"        result = programs["+repr(step['program'].upper())+"](context['record'])",'        results.append('+repr({'step':step['name'],'version':program_versions[step['program'].upper()]})+" | result)",'        previous_rc = result[\'return_code\']',"        context['record'] = result['record']",'    else:',"        results.append({'step': "+repr(step['name'])+", 'status': 'SKIPPED'})"]
         lines.append('    return results')
     lines+=['def run_process(context, programs):','    results = {}']

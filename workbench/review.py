@@ -4,7 +4,8 @@ from pathlib import Path
 import html
 import json
 import tempfile
-from .domain import require, sha, encode, decode, checked_zip, write_new, ValidationError
+import shutil
+from .domain import require, sha, encode, decode, checked_zip, write_new, ValidationError, MAX_UPLOAD
 
 GLOBAL_QUESTIONS = [
  ('G_SCOPE','Does the listed program/job/step inventory cover this process?'),
@@ -13,11 +14,40 @@ GLOBAL_QUESTIONS = [
  ('G_MATCH','Are the listed matching relationships and intentional missing-match cases interpreted correctly?'),
  ('G_TARGET','Is Python with SQLite/JSON files acceptable for this non-production POC?')]
 
+CHECKLIST_HEADER = ['Item ID','What we understood','Source evidence','Category','Answer','If No, what should it be?','Reviewer']
+CONTEXT_CHUNK_SIZE = 16000
+CHECKLIST_TEXT_LIMIT = 4000
+
+
+def _celltext(text):
+    return "'"+text if text.lstrip().startswith(('=','+','-','@')) else text
+
+
+def _validate_cell_capacity(text, label):
+    require(not isinstance(text,str) or len(text.encode('utf-16-le'))//2<=32767,
+            label+' exceeds Excel cell capacity; shorten the identifier/metadata before issuing the review')
+
+
+def _display_text(item, field):
+    return item.get('display_'+field,item[field])
+
+
+def _metadata_rows(packet):
+    return [['Process ID',packet['process_id']],['Packet hash',packet['packet_hash']],
+            ['Source snapshot',packet['source_snapshot']],
+            ['Evidence class','SOURCE_DERIVED_EXPECTED; no mainframe execution']]
+
+
+def _context_rows(packet):
+    context = packet['context']
+    return [['Process information']] + [[context[i:i+CONTEXT_CHUNK_SIZE]]
+                                         for i in range(0,len(context),CONTEXT_CHUNK_SIZE)]
+
 
 def packet_document(process):
     a=process['analysis']
     items=[{'id':r['id'],'question':r['plain'],'evidence':'; '.join(r['source_refs']),'kind':'business_rule'} for r in a['rules']]
-    context=json.dumps({'jobs':process['jobs'],'layouts':{n:p['fields'] for n,p in a['programs'].items()},'relationships':a['relationships'],'knowledge_input':process.get('knowledge_context')},ensure_ascii=False,indent=2)
+    context_data={'jobs':process['jobs'],'layouts':{n:p['fields'] for n,p in a['programs'].items()},'relationships':a['relationships'],'knowledge_input':process.get('knowledge_context')}
     items += [{'id':k,'question':q,'evidence':'See process inventory/layout/relationship context','kind':'process_assumption'} for k,q in GLOBAL_QUESTIONS]
     if process.get('knowledge_context'):items.append({'id':'G_KNOWLEDGE','question':'Is the supplied background knowledge correct and applicable to this process? If No, describe the correction.','evidence':'See knowledge_input context and its SHA256','kind':'process_assumption'})
     suggestions=process.get('llm',{}).get('analysis',{})
@@ -25,8 +55,24 @@ def packet_document(process):
         items.append({'id':f'LLM_{n:03d}','question':text,'evidence':'Unverified LLM suggestion; validate against source/context','kind':'provider_suggestion'})
     for i,b in enumerate(a['blockers']):items.append({'id':f'B_{i:03d}','question':'Is this unresolved item described correctly? If no, explain what it should do. '+b['message'],'evidence':b.get('path','Source/intake evidence'),'kind':'unresolved_item'})
     require(len(items)<=2000,'SME packet exceeds supported size; retain a scope blocker before issuing')
+    details={}
+    for item in items:
+        for field in ('question','evidence'):
+            if len(item[field])>CHECKLIST_TEXT_LIMIT:
+                details.setdefault(item['id'],{})[field]=item[field]
+                item['display_'+field]=(item[field][:1500]+'\n[Read the complete '+field+' for '+item['id']+
+                                       ' in Context > checklist_details before answering.]')
+        for field in ('id','kind'):
+            _validate_cell_capacity(item[field],'Checklist '+field)
+        for field in ('question','evidence'):
+            _validate_cell_capacity(_celltext(_display_text(item,field)),'Checklist '+field)
+    if details:context_data['checklist_details']=details
+    context=json.dumps(context_data,ensure_ascii=False,indent=2,sort_keys=True)
     doc={'version':1,'process_id':process['id'],'source_snapshot':a['source_snapshot'],'items':items,'context':context}
     doc['packet_hash']=sha(encode(doc))
+    for row in _metadata_rows(doc):
+        for value in row:_validate_cell_capacity(value,'Review metadata')
+    require(len(encode(doc))<=MAX_UPLOAD,'SME packet exceeds the supported document size; narrow the process scope before issuing')
     return doc
 
 
@@ -41,50 +87,79 @@ def export_packet(process, directory):
         require(existing['packet_hash']==document['packet_hash'],'Existing packet differs; cannot issue a second packet')
         return existing
     directory.parent.mkdir(parents=True,exist_ok=True)
-    temp=Path(tempfile.mkdtemp(prefix='.review-draft-',dir=directory.parent))
-    book=Workbook();sheet=book.active;sheet.title='Checklist'
-    sheet.append(['Item ID','What we understood','Source evidence','Category','Answer','If No, what should it be?','Reviewer'])
-    def celltext(s):return "'"+s if s.lstrip().startswith(('=','+','-','@')) else s
-    for item in document['items']:sheet.append([item['id'],celltext(item['question']),celltext(item['evidence']),item['kind'],'','',''])
-    for c in sheet[1]:c.font=Font(bold=True,color='FFFFFF');c.fill=PatternFill('solid',fgColor='18314F')
-    for row in sheet.iter_rows(min_row=2):
-        for c in row:c.alignment=Alignment(wrap_text=True,vertical='top')
-    for col,width in [('A',26),('B',80),('C',42),('D',22),('E',18),('F',60),('G',24)]:sheet.column_dimensions[col].width=width
-    sheet.freeze_panes='E2';sheet.auto_filter.ref=sheet.dimensions
-    dv=DataValidation(type='list',formula1='"Yes,No,Not sure"');dv.errorTitle='Choose an answer';dv.error='Use Yes, No or Not sure';dv.showErrorMessage=True;sheet.add_data_validation(dv);dv.add(f'E2:E{sheet.max_row}')
-    meta=book.create_sheet('Metadata');meta.append(['Process ID',document['process_id']]);meta.append(['Packet hash',document['packet_hash']]);meta.append(['Source snapshot',document['source_snapshot']]);meta.append(['Evidence class','SOURCE_DERIVED_EXPECTED; no mainframe execution'])
-    context=book.create_sheet('Context');context.append(['Process information']);context.column_dimensions['A'].width=120
-    for i in range(0,len(document['context']),16000):
-        context.append([document['context'][i:i+16000]]);context.cell(context.max_row,1).alignment=Alignment(wrap_text=True)
-    book.save(temp/'sme-checklist.xlsx');book.close()
-    word=Document();word.add_heading(process['name']+' — review checklist',0)
-    word.add_paragraph('Check each statement. Answer Yes, No or Not sure in the Excel file. For No, write the correction. This is the only review round for this process. Missing or uncertain answers remain unresolved. Source-derived expectations are predictions, not observed mainframe results.')
-    word.add_heading('Process context',1);word.add_paragraph(document['context'])
-    for item in document['items']:
-        word.add_heading(item['id'],2);word.add_paragraph(item['question']);word.add_paragraph('Evidence: '+item['evidence']);word.add_paragraph('Yes / No / Not sure. If No: __________________')
-    word.save(temp/'sme-checklist.docx')
-    rendered='<!doctype html><meta charset="utf-8"><title>SME checklist</title><h1>'+html.escape(process['name'])+'</h1><p>Return the Excel workbook. One review round. No mainframe execution.</p><pre>'+html.escape(document['context'])+'</pre>'+''.join('<section><h2>'+html.escape(i['id'])+'</h2><p>'+html.escape(i['question'])+'</p><small>'+html.escape(i['evidence'])+'</small></section>' for i in document['items'])
-    write_new(temp/'sme-checklist.html',rendered.encode());write_new(temp/'packet.json',encode(document));temp.rename(directory)
-    return document
+    # Process directories contain only registered evidence. A crash may leave a
+    # draft behind, so stage on the same filesystem outside that strict layout.
+    workspace=directory.parents[2] if directory.parent.parent.name=='processes' else directory.parent
+    staging=workspace/'.implementation/tmp';staging.mkdir(parents=True,exist_ok=True)
+    temp=Path(tempfile.mkdtemp(prefix='review-draft-',dir=staging))
+    try:
+        book=Workbook();sheet=book.active;sheet.title='Checklist'
+        sheet.append(CHECKLIST_HEADER)
+        for item in document['items']:sheet.append([item['id'],_celltext(_display_text(item,'question')),_celltext(_display_text(item,'evidence')),item['kind'],'','',''])
+        for c in sheet[1]:c.font=Font(bold=True,color='FFFFFF');c.fill=PatternFill('solid',fgColor='18314F')
+        for row in sheet.iter_rows(min_row=2):
+            for c in row:c.alignment=Alignment(wrap_text=True,vertical='top')
+        for col,width in [('A',26),('B',80),('C',42),('D',22),('E',18),('F',60),('G',24)]:sheet.column_dimensions[col].width=width
+        sheet.freeze_panes='E2';sheet.auto_filter.ref=sheet.dimensions
+        dv=DataValidation(type='list',formula1='"Yes,No,Not sure"');dv.errorTitle='Choose an answer';dv.error='Use Yes, No or Not sure';dv.showErrorMessage=True;sheet.add_data_validation(dv);dv.add(f'E2:E{sheet.max_row}')
+        meta=book.create_sheet('Metadata')
+        for row in _metadata_rows(document):meta.append(row)
+        context=book.create_sheet('Context');context.column_dimensions['A'].width=120
+        for row in _context_rows(document):
+            context.append(row);context.cell(context.max_row,1).data_type='s';context.cell(context.max_row,1).alignment=Alignment(wrap_text=True)
+        book.save(temp/'sme-checklist.xlsx');book.close()
+        # Exercise the actual import contract before publication/quota issuance.
+        # This catches writer truncation and archive/cell limits without SME answers.
+        read_answers((temp/'sme-checklist.xlsx').read_bytes(),document,'Packet export validation')
+        word=Document();word.add_heading(process['name']+' — review checklist',0)
+        word.add_paragraph('Check each statement. Answer Yes, No or Not sure in the Excel file. For No, write the correction. This is the only review round for this process. Missing or uncertain answers remain unresolved. Source-derived expectations are predictions, not observed mainframe results.')
+        word.add_heading('Process context',1);word.add_paragraph(document['context'])
+        for item in document['items']:
+            word.add_heading(item['id'],2);word.add_paragraph(item['question']);word.add_paragraph('Evidence: '+item['evidence']);word.add_paragraph('Yes / No / Not sure. If No: __________________')
+        word.save(temp/'sme-checklist.docx')
+        rendered='<!doctype html><meta charset="utf-8"><title>SME checklist</title><h1>'+html.escape(process['name'])+'</h1><p>Return the Excel workbook. One review round. No mainframe execution.</p><pre>'+html.escape(document['context'])+'</pre>'+''.join('<section><h2>'+html.escape(i['id'])+'</h2><p>'+html.escape(i['question'])+'</p><small>'+html.escape(i['evidence'])+'</small></section>' for i in document['items'])
+        write_new(temp/'sme-checklist.html',rendered.encode());write_new(temp/'packet.json',encode(document));temp.rename(directory)
+        return document
+    finally:
+        shutil.rmtree(temp,ignore_errors=True)
 
 
 def read_answers(data, packet, reviewer):
     from openpyxl import load_workbook
     require(isinstance(reviewer,str) and 0<len(reviewer.strip())<=160,'Name the reviewer responsible for this returned file')
-    checked_zip(data).close();book=load_workbook(BytesIO(data),read_only=True,data_only=False,keep_links=False)
+    require(packet.get('packet_hash')==sha(encode({k:v for k,v in packet.items() if k!='packet_hash'})),
+            'Frozen packet content/hash changed')
+    checked_zip(data).close()
+    frozen = {'Metadata':_metadata_rows(packet),'Context':_context_rows(packet),
+              'Checklist':[CHECKLIST_HEADER]+[[None]*7 for _ in packet['items']]}
+    def check_dimensions(book):
+        require(set(book.sheetnames)==set(frozen),'Review sheet set changed')
+        for name,rows in frozen.items():
+            sheet=book[name]
+            require(sheet.max_row==len(rows) and sheet.max_column==len(rows[0]),
+                    name+' dimensions changed')
+    # Check declared dimensions as well as actual cells. A forged XML dimension must
+    # neither hide extra cells from streaming reads nor add blank rows/columns.
+    declared=load_workbook(BytesIO(data),read_only=True,data_only=False,keep_links=False)
+    try:check_dimensions(declared)
+    finally:declared.close()
+    book=load_workbook(BytesIO(data),read_only=False,data_only=False,keep_links=False)
     try:
-        require({'Metadata','Checklist'}<=set(book.sheetnames),'Missing review sheets')
-        meta=book['Metadata'];sheet=book['Checklist']
-        require(meta['B1'].value==packet['process_id'] and meta['B2'].value==packet['packet_hash'] and meta['B3'].value==packet['source_snapshot'],'Packet identity/source version changed')
-        require(sheet.max_row==len(packet['items'])+1 and sheet.max_column==7,'Checklist item set or dimensions changed')
+        check_dimensions(book)
+        for name in ('Metadata','Context'):
+            for cells,row in zip(book[name].iter_rows(),frozen[name]):
+                require(all(c.data_type!='f' for c in cells),'Formulas are not accepted in '+name)
+                require([c.value for c in cells]==row,'Frozen '+name+' changed')
+        sheet=book['Checklist']
+        require(all(c.data_type!='f' for c in sheet[1]) and [c.value for c in sheet[1]]==CHECKLIST_HEADER,
+                'Checklist headings changed')
         expected={x['id']:x for x in packet['items']};answers={}
         for cells in sheet.iter_rows(min_row=2):
             require(all(c.data_type!='f' for c in cells),'Formulas are not accepted in returned answers')
             values=[c.value for c in cells];rid,q,ref,kind,answer,correction,actor=values
             require(rid in expected and rid not in answers,'Unknown or duplicate question ID')
             original=expected[rid]
-            def clean(s):return s[1:] if isinstance(s,str) and s.startswith("'") and s[1:].lstrip().startswith(('=','+','-','@')) else s
-            require(clean(q)==original['question'] and clean(ref)==original['evidence'] and kind==original['kind'],'Original question/evidence changed')
+            require(q==_celltext(_display_text(original,'question')) and ref==_celltext(_display_text(original,'evidence')) and kind==original['kind'],'Original question/evidence changed')
             answer=str(answer or '').strip();correction=str(correction or '').strip();actor=str(actor or reviewer).strip()
             require(answer in ('Yes','No','Not sure',''),'Answer must be Yes, No, Not sure or blank')
             require(len(correction)<=4000 and 0<len(actor)<=160,'Returned text exceeds supported bounds')

@@ -1,15 +1,23 @@
 """Loopback control API; explicit bounds and same-origin mutation protection."""
 import base64
 import secrets
+import asyncio
+from contextlib import asynccontextmanager
 from pathlib import Path
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import Response, JSONResponse
 from .coordinator import Coordinator
 from .domain import decode, ValidationError, require, safe_path
 from .reports import portfolio
 
 def create_app(root, origin='http://127.0.0.1:8765'):
-    c=Coordinator(root);app=FastAPI(docs_url=None,redoc_url=None,openapi_url=None)
+    c=Coordinator(root)
+    @asynccontextmanager
+    async def lifespan(app):
+        c.launch_worker()
+        try:yield
+        finally:await asyncio.to_thread(c.close)
+    app=FastAPI(docs_url=None,redoc_url=None,openapi_url=None,lifespan=lifespan)
     app.state.coordinator=c;token=secrets.token_urlsafe(32)
     static=Path(__file__).with_name('static')
     @app.middleware('http')
@@ -26,23 +34,42 @@ def create_app(root, origin='http://127.0.0.1:8765'):
     @app.exception_handler(ValidationError)
     async def invalid(request,exc):return JSONResponse({'error':str(exc)},400)
     async def body(request):
-        raw=await request.body();result=decode(raw,12*1024*1024);require(isinstance(result,dict),'Request must be a JSON object');return result
+        raw=bytearray()
+        async for chunk in request.stream():
+            if len(raw)+len(chunk)>12*1024*1024:raise HTTPException(413,'Request exceeds 12 MiB')
+            raw.extend(chunk)
+        result=decode(bytes(raw),12*1024*1024);require(isinstance(result,dict),'Request must be a JSON object');return result
+    def display_process(doc):
+        # Polling never repeats full synthetic record bodies. Evidence is downloaded on demand.
+        result=dict(doc)
+        result['runs']=[{k:v for k,v in run.items() if k!='programs'}|{'programs':{name:{k:v for k,v in r.items() if k not in ('actual','differences')}|{'case_count':len(r['actual']),'difference_count':len(r['differences'])} for name,r in run['programs'].items()}} for run in doc['runs']]
+        if doc.get('analysis'):
+            result['analysis']={k:v for k,v in doc['analysis'].items() if k!='programs'}
+        return result
     @app.get('/api/state')
     async def state():
-        return {'processes':c.ledger.list(True),'portfolio':portfolio(c.ledger),'token':token,
+        return {'processes':[display_process(p) for p in c.ledger.list(True)],'portfolio':portfolio(c.ledger),'token':token,
                 'capability':'Flat COBOL IF / literal MOVE subset. Other syntax remains blocked.',
                 'connections':{'zowe_profile_configured':bool(__import__('os').environ.get('WB_ZOWE_PROFILE')),'db2_endpoint_configured':bool(__import__('os').environ.get('WB_DB2_MCP_URL')),'llm_configured':bool(c.provider),'local_source_export':(c.root/'Endeavor').is_dir()}}
+    @app.get('/api/templates/intake')
+    async def template():
+        path=Path(__file__).parent.parent/'examples/intake-template.xlsx'
+        return Response(path.read_bytes(),media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',headers={'Content-Disposition':'attachment; filename="intake-template.xlsx"'})
     @app.post('/api/intake')
     async def intake(request:Request):
         b=await body(request)
         if b.get('xlsx'):
             from .intake import parse_intake_xlsx
             from .intake import HEADERS
-            m=parse_intake_xlsx(base64.b64decode(b['xlsx'],validate=True));rows=[]
+            require(isinstance(b['xlsx'],str),'Intake workbook must be base64 text')
+            try:data=base64.b64decode(b['xlsx'],validate=True)
+            except ValueError as exc:raise ValidationError('Invalid intake workbook encoding') from exc
+            m=parse_intake_xlsx(data);rows=[]
             for j in m['jobs']:
                 for s in j['steps']:rows.append([j['order'],j['name'],s['order'],s['name'],s['program'],';'.join(s['inputs']),';'.join(s['outputs']),s['condition']])
             b['manifest']='- Process ID: '+m['id']+'\n- Process name: '+m['name']+'\n| '+' | '.join(HEADERS)+' |\n'+'\n'.join('| '+' | '.join(map(str,r))+' |' for r in rows)
-        return c.create(b['manifest'],b['sources'],False,b.get('prompt',''))
+        require(isinstance(b.get('manifest'),str),'Provide a Markdown or Excel process manifest')
+        return c.create(b['manifest'],b.get('sources'),False,b.get('prompt',''))
     @app.post('/api/demo')
     async def demo():
         examples=Path(__file__).parent.parent/'examples';pid='demo-'+secrets.token_hex(4)
@@ -55,11 +82,16 @@ def create_app(root, origin='http://127.0.0.1:8765'):
         if action in ('pause','resume','cancel'):return c.control(pid,action)
         require(action=='answers','Unknown action')
         b=await body(request)
+        require(isinstance(b.get('xlsx'),str),'Supply the returned checklist as base64 text')
         try:data=base64.b64decode(b['xlsx'],validate=True)
         except (ValueError,KeyError) as exc:raise ValidationError('Supply the returned checklist workbook') from exc
         return c.import_answers(pid,data,b.get('reviewer',''))
     @app.get('/api/process/{pid}/events')
     async def events(pid:str):return c.ledger.events(pid)
+    @app.get('/api/process/{pid}/coverage')
+    async def coverage(pid:str):
+        from .coverage import build_coverage
+        return await asyncio.to_thread(build_coverage,c.ledger.get(pid),c.root)
     @app.get('/api/process/{pid}/artifact')
     async def artifact(pid:str,path:str):
         p=c.artifact(pid,path);return Response(p.read_bytes(),media_type='application/octet-stream',headers={'Content-Disposition':'attachment; filename="'+p.name+'"'})

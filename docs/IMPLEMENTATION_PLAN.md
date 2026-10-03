@@ -1,4 +1,6 @@
-# Mainframe workbench implementation plan
+# Initial implementation plan (historical)
+
+The bounded implementation and later revision are complete; see REVISION_PLAN.md, RELEASE_REVIEW.md and VALIDATION.md for actual evidence. The initial checklist below is retained as history, not as a current outstanding-task list. Broader unsupported semantics and platform certification remain bounded by MIGRATION_CONTRACT.md.
 
 > For agentic workers: use Superpowers executing-plans to implement this plan inline. The user has authorized implementation and new-branch publication.
 

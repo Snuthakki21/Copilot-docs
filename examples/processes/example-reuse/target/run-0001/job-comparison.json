@@ -43,10 +43,11 @@
             ]
           }
         ],
-        "version": "53fcfed5bff8aa5e0c89d77b4e65d9638b7b0acd5a20db95913a1bccc21d0587"
+        "version": "d3ee5b44a3fa4e38821cffd8fccd948b80f52e392c69a61c108792206ce67f1f"
       }
     ]
   },
+  "dataset_io_verified": false,
   "expected": {
     "REFJOB": [
       {
@@ -91,11 +92,12 @@
             ]
           }
         ],
-        "version": "53fcfed5bff8aa5e0c89d77b4e65d9638b7b0acd5a20db95913a1bccc21d0587"
+        "version": "d3ee5b44a3fa4e38821cffd8fccd948b80f52e392c69a61c108792206ce67f1f"
       }
     ]
   },
   "integration_cases": 1,
+  "io_adapter": "in_memory_record_only",
   "matched": true,
   "observed_mainframe_parity": false,
   "reason": "Ordered record-adapter job comparison; DSN I/O and external scheduling are outside this profile"

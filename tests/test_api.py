@@ -2,6 +2,7 @@ import asyncio
 import tempfile
 import unittest
 import json
+from pathlib import Path
 from workbench.api import create_app
 
 class ApiTests(unittest.IsolatedAsyncioTestCase):
@@ -23,11 +24,29 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
         status,_=await self.request('/api/demo','POST');self.assertEqual(status,403)
         _,raw=await self.request('/api/state');token=json.loads(raw)['token']
         status,_=await self.request('/api/demo','POST',headers=[(b'origin',b'http://evil.example'),(b'x-workbench-token',token.encode())]);self.assertEqual(status,403)
+    async def test_malformed_intake_and_oversized_body_fail_with_validation(self):
+        _,raw=await self.request('/api/state');token=json.loads(raw)['token']
+        headers=[(b'origin',b'http://127.0.0.1:8765'),(b'x-workbench-token',token.encode())]
+        status,_=await self.request('/api/intake','POST',{'xlsx':'not-base64'},headers)
+        self.assertEqual(status,400)
+        status,_=await self.request('/api/intake','POST',{'manifest':'x'},headers)
+        self.assertEqual(status,400)
+        status,_=await self.request('/api/intake','POST',{'prompt':'a'*(12*1024*1024+1)},headers)
+        self.assertEqual(status,413)
     async def test_real_demo_enters_single_review_stage_and_static_is_local(self):
         status,raw=await self.request('/api/state');self.assertEqual(status,200);token=json.loads(raw)['token']
         status,raw=await self.request('/api/demo','POST',headers=[(b'origin',b'http://127.0.0.1:8765'),(b'x-workbench-token',token.encode())]);self.assertEqual(status,200)
         doc=json.loads(raw);self.app.state.coordinator.advance(doc['id'])
         self.assertEqual(self.app.state.coordinator.ledger.get(doc['id'])['status'],'WAITING_SME')
         status,raw=await self.request('/');self.assertEqual(status,200);self.assertIn(b'/app.js',raw)
+    async def test_nontext_review_and_unencodable_source_have_named_validation_errors(self):
+        _,raw=await self.request('/api/state');token=json.loads(raw)['token']
+        headers=[(b'origin',b'http://127.0.0.1:8765'),(b'x-workbench-token',token.encode())]
+        for value in (123,[],None):
+            status,raw=await self.request('/api/process/missing/answers','POST',{'xlsx':value,'reviewer':'A'},headers)
+            self.assertEqual(status,400);self.assertIn(b'base64 text',raw)
+        manifest=(Path(__file__).parent.parent/'examples/process-input.md').read_text()
+        status,raw=await self.request('/api/intake','POST',{'manifest':manifest,'sources':{'BAD.cbl':'\ud800'}},headers)
+        self.assertEqual(status,400);self.assertIn(b'UTF-8',raw)
 
 if __name__=='__main__':unittest.main()
