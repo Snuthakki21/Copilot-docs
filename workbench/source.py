@@ -115,7 +115,44 @@ def normalized_lines(text):
     return result
 
 
-def analyze_program(path, text, files):
+def sql_table_references(text):
+    """Conservative unquoted SQL reference candidates, never live catalog facts.
+
+    Literals, delimited identifiers and both comment forms are masked before
+    matching. Delimited identifiers and dynamic SQL need the database adapter;
+    extracting apparent SQL inside a string would manufacture table evidence.
+    """
+    masked=[];i=0;quote=None;comment_depth=0;line_comment=False
+    while i<len(text):
+        char=text[i];pair=text[i:i+2]
+        if line_comment:
+            masked.append('\n' if char=='\n' else ' ')
+            if char=='\n':line_comment=False
+            i+=1;continue
+        if comment_depth:
+            if pair=='/*':comment_depth+=1;masked.extend('  ');i+=2;continue
+            if pair=='*/':comment_depth-=1;masked.extend('  ');i+=2;continue
+            masked.append('\n' if char=='\n' else ' ');i+=1;continue
+        if quote:
+            masked.append('\n' if char=='\n' else ' ')
+            if char==quote:
+                if i+1<len(text) and text[i+1]==quote:masked.append(' ');i+=2;continue
+                quote=None
+            i+=1;continue
+        if pair=='--':line_comment=True;masked.extend('  ');i+=2;continue
+        if pair=='/*':comment_depth=1;masked.extend('  ');i+=2;continue
+        # Keep a non-identifier barrier where a quoted token began. Pure spaces
+        # could otherwise turn FROM "T" JOIN REAL into a false FROM JOIN match.
+        if char in ('\'', '"'):quote=char;masked.append('?');i+=1;continue
+        masked.append(char);i+=1
+    candidates=re.findall(r'\b(?:FROM|JOIN|INTO|UPDATE|CREATE\s+TABLE)\s+([A-Z][A-Z0-9_@$#]*(?:\.[A-Z][A-Z0-9_@$#]*)*)(?![A-Z0-9_@$#.])',''.join(masked),re.I)
+    # These names introduce expressions or data-change table references, rather
+    # than naming an actual table. This is deliberately not a SQL parser.
+    expression_words={'FINAL','OLD','NEW','TABLE','SELECT','VALUES','UNNEST','XMLTABLE','LATERAL','SET','JOIN','WHERE','ON','GROUP','ORDER'}
+    return sorted({name.upper() for name in candidates if name.upper() not in expression_words})
+
+
+def analyze_program(path, text, files, classifications=None):
     source_hash=sha(text)
     program_matches=[re.fullmatch(r'PROGRAM-ID\.\s*('+NAME+r')\.', line,re.I) for kind,line in normalized_lines(text) if kind=='code']
     program_matches=[m for m in program_matches if m]
@@ -171,7 +208,10 @@ def analyze_program(path, text, files):
             if cm:
                 if section!='LINKAGE':block('COPY layout must belong to the supported LINKAGE record section',[i])
                 book=cm.group(1).upper();p['copybooks'].append(book)
-                matches=[(fp,ft) for fp,ft in files.items() if fp.lower().endswith(('.cpy','.copy')) and fp.rsplit('/',1)[-1].rsplit('.',1)[0].upper()==book]
+                matches=[(fp,ft) for fp,ft in files.items()
+                         if (classifications.get(fp, {}).get('kind')=='copybook'
+                             if classifications is not None else fp.lower().endswith(('.cpy','.copy')))
+                         and fp.rsplit('/',1)[-1].rsplit('.',1)[0].upper()==book]
                 if len(matches)!=1:
                     p['dependencies'].extend({'name':book,'path':fp,'source_hash':sha(ft),'resolution':'ambiguous'} for fp,ft in matches)
                     block('Copybook missing or ambiguous: '+book,[i]);continue
@@ -237,22 +277,59 @@ def analyze_program(path, text, files):
 
 def analyze_sources(files, manifest):
     require(isinstance(files,dict) and len(files)<=200,'Source export exceeds file-count bound')
+    # A missing snapshot is an intentional historical compatibility boundary:
+    # old immutable reports must reproduce their original extension-based analysis.
+    classifications=None;findings=[]
+    if 'mainframe_knowledge' in manifest:
+        from .mainframe import classify_files, utility_findings, validate_snapshot
+        for path,text in files.items():
+            require(isinstance(text,str) and len(text)<=512000,'Source file too large')
+        validate_snapshot(manifest['mainframe_knowledge'])
+        classifications=classify_files(files,manifest,manifest['mainframe_knowledge'])
+        findings=utility_findings(manifest,manifest['mainframe_knowledge'],files)
     programs={};assets=[];blockers=[]
     for path,text in sorted(files.items()):
         require(isinstance(text,str) and len(text)<=512000,'Source file too large')
         lower=path.lower();stem=path.rsplit('/',1)[-1].rsplit('.',1)[0].upper();h=sha(text)
-        if lower.endswith(('.cbl','.cob','.cobol')):
-            p=analyze_program(path,text,files)
+        classification=classifications[path] if classifications is not None else None
+        classified_kind=classification['kind'] if classification is not None else None
+        is_program=classified_kind=='cobol_program' if classification is not None else lower.endswith(('.cbl','.cob','.cobol'))
+        if is_program:
+            p=analyze_program(path,text,files,classifications)
+            if classification is not None:p['target_contract_version']=2
             require(p['name'] not in programs,'Duplicate program ID needs disambiguation')
             programs[p['name']]=p;assets.append(dict(p))
         else:
-            kind='copybook' if lower.endswith(('.cpy','.copy')) else 'jcl_job' if lower.endswith('.jcl') else 'bms_map' if lower.endswith('.bms') else 'sql' if lower.endswith('.sql') else 'other_source'
+            if classification is not None:
+                kind=classified_kind if classified_kind in ('copybook','jcl_job','bms_map','sql') else 'other_source'
+            else:
+                kind='copybook' if lower.endswith(('.cpy','.copy')) else 'jcl_job' if lower.endswith('.jcl') else 'bms_map' if lower.endswith('.bms') else 'sql' if lower.endswith('.sql') else 'other_source'
             asset={'id':sha(kind+':'+stem+':'+h),'kind':kind,'name':stem,'path':path,'source_hash':h,'source_text':text,'loc':{'physical':len(text.splitlines()),'code':sum(bool(x.strip()) and not x.lstrip().startswith(('*>','--','//*')) for x in text.splitlines())}}
-            if kind=='sql':asset['tables']=sorted(set(re.findall(r'\b(?:FROM|JOIN|INTO|UPDATE|CREATE\s+TABLE)\s+([A-Z][A-Z0-9_.]*)',text,re.I)))
+            if classification is not None:
+                # Unknown languages cannot inherit another language's comment rules.
+                if kind=='copybook':asset['loc']['code']=sum(k not in ('blank','comment') for k,_ in normalized_lines(text))
+                else:
+                    prefix={'jcl_job':'//*','sql':'--'}.get(kind)
+                    asset['loc']['code']=sum(bool(x.strip()) and not (prefix and x.lstrip().startswith(prefix)) for x in text.splitlines())
+                if classified_kind in ('unknown','ambiguous') or classification.get('conflicts'):
+                    blockers.append({'kind':'source_classification','path':path,'message':'File classification is '+classified_kind+'; resolve the source type using original export metadata and content evidence before conversion. '+('; '.join(classification.get('conflicts',[])))})
+                elif kind in ('other_source','sql'):
+                    blockers.append({'kind':'unsupported_source','path':path,'message':'Recognized '+classified_kind+' source requires a reviewed semantic adapter; recognizing its file type does not convert its behavior.'})
+            if kind=='sql':
+                asset['tables']=sql_table_references(text) if classification is not None else sorted(set(re.findall(r'\b(?:FROM|JOIN|INTO|UPDATE|CREATE\s+TABLE)\s+([A-Z][A-Z0-9_.]*)',text,re.I)))
+                if classification is not None:asset['table_evidence_basis']='STATIC_UNQUOTED_REFERENCES_NOT_CATALOG_INVENTORY'
             if kind=='bms_map':
                 asset['screens']=re.findall(r'^(\w+)\s+DFHMDI\b',text,re.M|re.I)
                 blockers.append({'kind':'unsupported_source','message':'BMS/CICS behavior requires source-supported action mapping; no replacement screen is credited.','path':path})
             assets.append(asset)
+    for finding in findings:
+        refs=finding.get('source_refs',[]);first_ref=refs[0] if refs else {}
+        location=(finding['job']+'.'+finding['step']) if finding.get('job') and finding.get('step') else first_ref.get('path','source export')+(':'+str(first_ref['line']) if first_ref.get('line') else '')
+        blocker={'kind':'unsupported_utility','message':'Utility '+finding['program']+' in '+location+' is recognized but has no verified executable adapter. '+finding.get('behavior','')+' Required evidence: '+('; '.join(finding.get('required_evidence',[]))), 'job':finding.get('job',''),'step':finding.get('step',''),'utility_id':finding['utility_id']}
+        if first_ref:
+            blocker['source_refs']=refs;blocker['path']=first_ref['path']
+            blocker['lines']=[r['line'] for r in refs if r['path']==first_ref['path']]
+        blockers.append(blocker)
     graph=[]
     used=set()
     for job in manifest['jobs']:
@@ -266,7 +343,9 @@ def analyze_sources(files, manifest):
     # Validate the entire supported card grammar and reconcile source step order.
     jcl_job_origins={}
     for path,text in files.items():
-        if not path.lower().endswith('.jcl'):continue
+        if classifications is not None:
+            if classifications[path]['kind']!='jcl_job':continue
+        elif not path.lower().endswith('.jcl'):continue
         current=None;source_jobs={}
         for raw in text.splitlines():
             if not raw.strip() or raw.startswith('//*'):continue
@@ -296,4 +375,6 @@ def analyze_sources(files, manifest):
         asset['scope_disposition']='selected' if asset['selected'] else 'out_of_scope'
         asset['scope_reason']='Selected manifest program, resolved dependency, or additional process export requiring accountability' if asset['selected'] else 'Not called by the selected manifest and not a resolved COPY dependency'
     scoped_assets=assets
-    return {'programs':scoped,'assets':scoped_assets,'rules':[r for p in scoped.values() for r in p['rules']], 'graph':graph,'blockers':blockers,'source_snapshot':sha('\n'.join(k+':'+sha(v) for k,v in sorted(files.items()))),'source_accounting':{p['name']:p['coverage'] for p in scoped.values()}, 'relationships':[r for p in scoped.values() for r in p['relationships']], 'evidence_basis':'SOURCE_DERIVED_EXPECTED'}
+    result={'programs':scoped,'assets':scoped_assets,'rules':[r for p in scoped.values() for r in p['rules']], 'graph':graph,'blockers':blockers,'source_snapshot':sha('\n'.join(k+':'+sha(v) for k,v in sorted(files.items()))),'source_accounting':{p['name']:p['coverage'] for p in scoped.values()}, 'relationships':[r for p in scoped.values() for r in p['relationships']], 'evidence_basis':'SOURCE_DERIVED_EXPECTED'}
+    if classifications is not None:result.update({'classifications':classifications,'utility_findings':findings})
+    return result

@@ -8,6 +8,12 @@ Use CPython 3.12. On Windows run `./scripts/Setup.ps1`, then `./scripts/Start.ps
 
 Uvicorn serves only 127.0.0.1. Keep the workspace on local disk; one Coordinator owns it at a time. Stop the UI before using the CLI on the same workspace. Ctrl+C and restart preserve state, quota and evidence. Windows wheel availability is verified; native Windows/PowerShell execution remains untested here.
 
+Run `python -m workbench.preflight --workspace WORKSPACE --manifest MANIFEST --json`
+in the configured environment, or use **Setup → Run local preflight** in the UI.
+Local readiness, conversion support and live connectivity are separate results.
+[docs/OPERATIONS.md](docs/OPERATIONS.md) lists every required setup input, the
+failure/recovery matrix and the acceptance checklist.
+
 ## Start a process
 
 1. Put the complete UTF-8 text export in **`Endeavor/`**, or select source files in the UI. Local exports retain relative filenames and exact bytes. Every supplied text file is inventoried, including unknown extensions, with explicit scope/reasons.
@@ -49,6 +55,16 @@ Set private environment variables before launch; `.env.example` is a template, n
 No live source/provider connection is certified here. Discovered database schemas are not automatically imported as synthetic fixture contracts. Configuration is not connectivity.
 
 Put Devin/background articles in **`knowledge/inbox/context.md`**, maximum 16 KB; frozen content is unverified background. Confirmed source/version/reviewer-bound facts accumulate in **`knowledge/records.json`** and one **`knowledge/INDEX.md`**. Past answers do not approve changed source automatically.
+
+Use the **Knowledge** tab to inspect mainframe file classifications, utility
+behavior, risks and required evidence. Standard knowledge lives in
+**[knowledge/mainframe-catalog.json](knowledge/mainframe-catalog.json)** with its
+plain-language **[guide](knowledge/README.md)**. Add application/vendor utility
+facts to **`WORKSPACE/knowledge/application-knowledge.json`**; setup initializes
+it from **[examples/application-knowledge.json](examples/application-knowledge.json)**.
+Each new process freezes that knowledge in `analysis/mainframe-knowledge.json`.
+Recognition does not grant conversion support; unknown files and missing
+utility adapters stay blocked and enter the one SME review.
 
 Each process has `input/`, `analysis/`, `review/`, `synthetic/`, `target/`, `reports/` and `tests/`. Shared programs use `shared/target/python/HASH.py`. Back up the entire workspace; do not edit ledger/hashes/snapshots. Source, credentials and runtime evidence remain ignored by git. See the folder contract for exact filenames.
 

@@ -4,4 +4,10 @@
 
 `processes/example-reuse/` contains the second completed fixture process grouped by input, analysis, review, synthetic, target and reports. The six-slide management deck and full coverage are under `reports/report-0001/`. Shared targets are content-addressed in `shared/target/python/`. Every generated deck slide explicitly says fictional test fixture. Source-derived output is not an observed mainframe result.
 
+This is the preserved historical version 1 fixture; it predates the frozen
+mainframe catalog and embedded target input guards. Do not rewrite its evidence
+in place. Run the tool in a fresh workspace to exercise the current version 2
+targets, editable application catalog and classification workflow. Current
+regression results are in `../VALIDATION.md`.
+
 The isolated fixture intentionally exercises ordinary portfolio counting, so its two processes/one shared program are fixture metrics, not actual production inventory. This exported evidence has no workflow ledger; use a fresh test workspace to reproduce, not Resume inside this folder. PowerPoint structure and all six Artifact Tool renderings were inspected. Native PowerPoint/Windows and browser rendering remain unverified.

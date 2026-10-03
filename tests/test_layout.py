@@ -70,9 +70,10 @@ class LayoutTests(unittest.TestCase):
         from test_workflow import MANIFEST
         c = Coordinator(self.root); self.addCleanup(c.close)
         doc = c.create(MANIFEST, {'ELIGIBLE.cbl': COBOL})
+        before=list(doc['artifacts'])
         for name in ('../process-b/reports/metrics.json', 'analysis/jobs.py', 'rogue/results.json'):
             with self.assertRaises(ValidationError): c.register(doc, name)
-        self.assertEqual(doc['artifacts'], [])
+        self.assertEqual(doc['artifacts'], before)
 
     def test_core_constructor_rejects_misplaced_outputs_before_state_creation(self):
         from workbench.coordinator import Coordinator
@@ -91,7 +92,8 @@ class LayoutTests(unittest.TestCase):
         with self.assertRaisesRegex(ValidationError, 'layout'):
             c.advance('process-a')
         self.assertEqual(c.ledger.get('process-a')['status'], 'QUEUED_ANALYSIS')
-        self.assertFalse((self.root / 'processes/process-a/analysis').exists())
+        self.assertFalse((self.root / 'processes/process-a/analysis/source-analysis.json').exists())
+        self.assertTrue((self.root / 'processes/process-a/analysis/mainframe-knowledge.json').is_file())
         misplaced.unlink(); c.advance('process-a')
         doc = c.ledger.get('process-a')
         misplaced.write_text('{}')

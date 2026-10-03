@@ -5,7 +5,7 @@ import copy
 import random
 from .domain import encode, sha, require
 from .reference import run_reference, input_errors
-from .target import run_generated
+from .target import run_generated, prepare_generated, rule_nodes, layout_nodes
 
 
 def comparisons(node):
@@ -15,6 +15,9 @@ def comparisons(node):
 
 def plan_cases(program, seed=21, budget=256):
     require(type(budget) is int and 1<=budget<=256,'Case budget must be between 1 and 256')
+    if program.get('target_contract_version') == 2:
+        # Ledger JSON canonicalization must not alter the frozen case order.
+        program={**program,'fields':dict(sorted(program['fields'].items()))}
     rng=random.Random(seed)
     base={k:f['default'] for k,f in program['fields'].items()}
     values={};comparators=[c for r in program['rules'] for c in comparisons(r['predicate'])]
@@ -43,7 +46,9 @@ def plan_cases(program, seed=21, budget=256):
             return
         expected=run_reference(program,record)
         groups={}
-        for k,v in record.items():groups.setdefault(program['fields'][k]['group'],{})[k]=v
+        if isinstance(record,dict):
+            for k,v in record.items():
+                if k in program['fields']:groups.setdefault(program['fields'][k]['group'],{})[k]=v
         candidates[fingerprint]={'mandatory':mandatory,'reason':reason,'record':record,'files':{group:[row] for group,row in groups.items()},'expected':expected,'intentional_invalid':expected['input_status']=='REJECT_INPUT'}
     add(base.copy(),'Source-layout baseline with synthetic identities')
     for name,options in values.items():
@@ -51,6 +56,15 @@ def plan_cases(program, seed=21, budget=256):
         for v in unique:add({**base,name:v},f'Boundary/domain witness: {name}={v!r}')
     for name,f in program['fields'].items():
         for bad in ([-1,f['max']+1,'wrong-type'] if f['type']=='integer' else ['', 'X'*(f['width']+1),None]):add({**base,name:bad},f'Intentional input-layout violation: {name}')
+    if program.get('target_contract_version') == 2:
+        # These records test the exported function itself, including Python's
+        # bool-is-an-int pitfall and callers that bypass the workbench UI.
+        for bad in (None, [], list(base.items())):add(bad,'Intentional non-object input contract violation')
+        add({**base,'__EXTRA_FIELD__':'unexpected'},'Intentional extra field input contract violation')
+        for name,field in program['fields'].items():
+            add({k:v for k,v in base.items() if k!=name},'Intentional missing field input contract violation: '+name)
+            for bad in ([True,False,0.0,None] if field['type']=='integer' else [True,0,[]]):
+                add({**base,name:bad},'Intentional strict type input contract violation: '+name)
     names=list(values)
     # Reserve layout violations before filling the remaining budget with interactions.
     for combination in itertools.islice(itertools.product(*(values[n] for n in names)),min(4096,budget*16)):add({**base,**dict(zip(names,combination))},'Source-predicate interaction witness',False)
@@ -73,7 +87,9 @@ def plan_cases(program, seed=21, budget=256):
         for t in case['expected'].get('trace',[]):branches[t['rule_id']]['true' if t['branch'] else 'false'].append(case['id'])
     gaps=[{'rule_id':rid,'branch':branch,'status':'unknown_or_unprovable','reason':'No witness in bounded source-derived candidates; branch may be unreachable or require additional interactions. No verification credit.'} for rid,record in branches.items() for branch,witnesses in record.items() if not witnesses]
     coverage={'rule_count':len(branches),'branch_targets':len(branches)*2,'branches_observed':sum(bool(w) for b in branches.values() for w in b.values()),'rules':branches,'gaps':gaps,'obligation_gaps':obligation_gaps,'budget':budget,'mandatory_candidates':sum(c['mandatory'] for c in candidates.values()),'complete':not gaps and not obligation_gaps and not program['blockers'],'exhaustive':False,'claim':'Decision outcomes for the supported source IR; not all input/path/condition coverage or observed legacy parity.'}
-    return {'version':1,'program':program['name'],'source_hash':program['source_hash'],'seed':seed,'evidence_basis':'SOURCE_DERIVED_EXPECTED','generator_version':'source-subset-1','cases':cases,'coverage':coverage,'contract_hash':sha(encode({'source':program.get('semantic_hash',program['source_hash']),'seed':seed,'rules':program['rules'],'fields':program['fields']}))}
+    contract={'source':program.get('semantic_hash',program['source_hash']),'seed':seed,'rules':program['rules'],'fields':program['fields']}
+    if program.get('target_contract_version') == 2:contract['target_contract_version']=2
+    return {'version':1,'program':program['name'],'source_hash':program['source_hash'],'seed':seed,'evidence_basis':'SOURCE_DERIVED_EXPECTED','generator_version':'source-subset-2' if program.get('target_contract_version') == 2 else 'source-subset-1','cases':cases,'coverage':coverage,'contract_hash':sha(encode(contract))}
 
 
 def verify_program(program,code,suite,checkpoint=None):
@@ -83,15 +99,32 @@ def verify_program(program,code,suite,checkpoint=None):
 
 def _verify_cases(program,code,suite,checkpoint=None):
     require(suite['source_hash']==program['source_hash'],'Fixture source version differs')
-    actual=[];diffs=[]
+    actual=[];diffs=[];execute=None
     for case in suite['cases']:
         if checkpoint:checkpoint()
         require(encode(case['expected'])==encode(run_reference(program,case['record'])),'Frozen expected result differs from independent source interpretation')
-        errors=input_errors(program,case['record'])
-        got={'input_status':'REJECT_INPUT','errors':errors,'return_code':None} if errors else run_generated(code,case['record'])
+        if program.get('target_contract_version') == 2:
+            if execute is None:execute=prepare_generated(code)
+            try:got=execute(case['record'])
+            except (TypeError,KeyError,ValueError,AttributeError,OverflowError) as exc:
+                # A malformed target must produce failed evidence, including
+                # when a guard mutation exposes an exception on invalid data.
+                got={'input_status':'TARGET_ERROR','error_type':type(exc).__name__,'return_code':None}
+        else:
+            # Historical receipts used this adapter. Preserve replay exactly;
+            # new contracts validate inside the generated target above.
+            errors=input_errors(program,case['record'])
+            if errors:got={'input_status':'REJECT_INPUT','errors':errors,'return_code':None}
+            else:
+                if execute is None:execute=prepare_generated(code)
+                got=execute(case['record'])
         actual.append({'case_id':case['id'],'result':got})
         if encode(got)!=encode(case['expected']):diffs.append({'case_id':case['id'],'expected':case['expected'],'actual':got,'triage':'Target, oracle or adapter discrepancy; inspect source evidence before changing expectations.'})
-    return {'status':'MISMATCH' if diffs else 'MATCHED_SOURCE_DERIVED_EXPECTATIONS' if suite['coverage']['complete'] else 'MATCHED_WITH_COVERAGE_GAPS','source_hash':program['source_hash'],'target_hash':sha(code),'contract_hash':suite['contract_hash'],'expected_count':len(suite['cases']),'matched_count':len(suite['cases'])-len(diffs),'differences':diffs,'actual':actual,'coverage':suite['coverage'],'observed_legacy_parity':False}
+    result={'status':'MISMATCH' if diffs else 'MATCHED_SOURCE_DERIVED_EXPECTATIONS' if suite['coverage']['complete'] else 'MATCHED_WITH_COVERAGE_GAPS','source_hash':program['source_hash'],'target_hash':sha(code),'contract_hash':suite['contract_hash'],'expected_count':len(suite['cases']),'matched_count':len(suite['cases'])-len(diffs),'differences':diffs,'actual':actual,'coverage':suite['coverage'],'observed_legacy_parity':False}
+    if program.get('target_contract_version') == 2:
+        result['input_validation_basis']='GENERATED_TARGET_FUNCTION'
+        result['invalid_inputs_executed']=sum(c['intentional_invalid'] for c in suite['cases'])
+    return result
 
 
 def adversarial_review(program, code, suite, checkpoint=None):
@@ -102,7 +135,7 @@ def adversarial_review(program, code, suite, checkpoint=None):
     mutation is an explicit gap (including effects overwritten downstream).
     """
     require(encode(suite)==encode(plan_cases(program,suite['seed'],suite['coverage']['budget'])), 'Adversarial suite differs from frozen source contract')
-    tree=ast.parse(code);rules=[n for n in tree.body[0].body if isinstance(n,ast.If)]
+    tree=ast.parse(code);rules=rule_nodes(tree,program)
     require(len(rules)==len(program['rules']),'Target rule structure differs')
     mutations=[]
     boundaries={ast.Eq:ast.NotEq,ast.NotEq:ast.Eq,ast.GtE:ast.Gt,ast.Gt:ast.GtE,ast.LtE:ast.Lt,ast.Lt:ast.LtE}
@@ -112,13 +145,13 @@ def adversarial_review(program, code, suite, checkpoint=None):
         detected=bool(result['differences'])
         mutations.append({'rule_id':rid,'kind':kind,'mutation':label,'detected':detected,'witnesses':[d['case_id'] for d in result['differences']], 'reason':'Frozen source expectations detected changed target behavior' if detected else 'No differentiating output/trace witness; effect may be masked or unreachable. Unproved, no adversarial credit.'})
     for index,rule in enumerate(program['rules']):
-        mutant=copy.deepcopy(tree);branch=[n for n in mutant.body[0].body if isinstance(n,ast.If)][index]
+        mutant=copy.deepcopy(tree);branch=rule_nodes(mutant,program)[index]
         # Swap the whole decision, including its trace, without changing oracle IR.
         branch.body,branch.orelse=branch.orelse,branch.body
         record(mutant,rule['id'],'predicate','reverse whole decision')
         relations=[n for n in ast.walk(rules[index].test) if isinstance(n,ast.Compare)]
         for offset,relation in enumerate(relations):
-            mutant=copy.deepcopy(tree);branch=[n for n in mutant.body[0].body if isinstance(n,ast.If)][index]
+            mutant=copy.deepcopy(tree);branch=rule_nodes(mutant,program)[index]
             comparison=[n for n in ast.walk(branch.test) if isinstance(n,ast.Compare)][offset]
             comparison.ops[0]=boundaries[type(comparison.ops[0])]()
             record(mutant,rule['id'],'comparison',f'boundary relation {offset+1}')
@@ -126,15 +159,21 @@ def adversarial_review(program, code, suite, checkpoint=None):
             for offset,effect in enumerate(rule[arm]):
                 spec=program['fields'][effect['field']];old=effect['value']
                 value=(old+1)%(spec['max']+1) if spec['type']=='integer' else ('Z' if old[:1]!='Z' else 'Y')+old[1:]
-                mutant=copy.deepcopy(tree);branch=[n for n in mutant.body[0].body if isinstance(n,ast.If)][index]
+                mutant=copy.deepcopy(tree);branch=rule_nodes(mutant,program)[index]
                 assignments=[n for n in (branch.body if arm=='then' else branch.orelse) if isinstance(n,ast.Assign)]
                 require(offset<len(assignments),'Target effect structure differs')
                 assignments[offset].value=ast.Constant(value=value)
                 record(mutant,rule['id'],'effect',f'{arm} assignment {offset+1}: {effect["field"]}')
+    for index,guard in enumerate(layout_nodes(tree,program)):
+        mutant=copy.deepcopy(tree)
+        layout_nodes(mutant,program)[index].test=ast.Constant(value=False)
+        record(mutant,'INPUT_CONTRACT','input_contract',f'disable input guard {index+1}')
     denied=False
     if checkpoint:checkpoint()
     try:run_generated('import os\ndef run_program(record):\n    return record\n',{})
     except ValueError:denied=True
     gaps=[m for m in mutations if not m['detected']]
     accounted=all(x['disposition']!='unaccounted' for x in program['coverage'])
-    return {'method':'deterministic per-rule, per-comparison and per-effect target mutations against frozen source expectations; not independent human/model review', 'mutations':mutations,'gaps':gaps,'mutation_detected':bool(mutations) and not gaps,'forbidden_import_rejected':denied,'source_accounted':accounted,'passed':not gaps and denied and accounted}
+    method='deterministic per-rule, per-comparison and per-effect target mutations against frozen source expectations; not independent human/model review'
+    if program.get('target_contract_version') == 2:method+='; each generated input guard is also disabled and tested against rejecting witnesses'
+    return {'method':method, 'mutations':mutations,'gaps':gaps,'mutation_detected':bool(mutations) and not gaps,'forbidden_import_rejected':denied,'source_accounted':accounted,'passed':not gaps and denied and accounted}

@@ -49,6 +49,24 @@ class Ledger:
         with self.lock: rows = self.db.execute('SELECT id FROM processes WHERE demo=0 OR ?=1 ORDER BY created', (int(include_demo),)).fetchall()
         return [self.get(r['id']) for r in rows]
 
+    def controls(self, pid):
+        """Read durable operator controls without materializing synthetic results.
+
+        SQLite's JSON projection keeps per-record cancellation checks small.
+        Older SQLite builds without JSON support retain the safe full-read path.
+        """
+        identity(pid)
+        with self.lock:
+            try:
+                row=self.db.execute("SELECT status, json_extract(document,'$.control_revision') AS control_revision, json_extract(document,'$.cancel_requested') AS cancel_requested, json_extract(document,'$.resume_status') AS resume_status FROM processes WHERE id=?",(pid,)).fetchone()
+            except sqlite3.OperationalError as exc:
+                if 'no such function: json_extract' not in str(exc):raise
+                return self.get(pid)
+        require(row is not None,'Process not found')
+        result={key:row[key] for key in row.keys() if row[key] is not None}
+        result['blockers']=[{'kind':'cancelled','message':'Operator cancelled this process'}] if result.get('cancel_requested') else []
+        return result
+
     def save(self, doc, status=None):
         pid = identity(doc['id'])
         canonical = {k:v for k,v in doc.items() if k not in {'status','packet_issued','packet_imported','packet_hash','created','updated'}}

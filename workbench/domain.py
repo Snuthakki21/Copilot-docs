@@ -9,6 +9,7 @@ import zipfile
 from io import BytesIO
 
 MAX_UPLOAD = 8 * 1024 * 1024
+MAX_SOURCE_LINES = 100_000
 ID = re.compile(r'^[a-zA-Z][a-zA-Z0-9_-]{0,79}$')
 DEVICES = {'CON','PRN','AUX','NUL',*(f'COM{i}' for i in range(1,10)),*(f'LPT{i}' for i in range(1,10))}
 

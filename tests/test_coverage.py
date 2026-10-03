@@ -123,7 +123,7 @@ class CoverageTests(unittest.TestCase):
         self.assertTrue(build_coverage(doc,self.root)['summary']['completion_eligible'])
 
     def test_comment_grammar_is_source_kind_aware_and_unknown_behavior_is_blocked(self):
-        files={'ELIGIBLE.cbl':COBOL,'unknown.export':'--EXEC UNKNOWN\n*>EXEC OTHER\n//*EXEC UNKNOWN\n','query.sql':'--SQL comment\n','screen.bms':'--NOT VALIDATED BMS COMMENT\n'}
+        files={'ELIGIBLE.cbl':COBOL,'unknown.export':'--EXEC UNKNOWN\n*>EXEC OTHER\n//*EXEC UNKNOWN\n','query.sql':'--SQL comment\nSELECT * FROM ACTUAL_TABLE;\n','screen.bms':'--NOT VALIDATED BMS COMMENT\n'}
         model=build_coverage(self.verified(files),self.root)
         unknown=[row for row in model['rows'] if row['source_path']=='unknown.export']
         self.assertTrue(all(row['disposition']=='blocked' for row in unknown))

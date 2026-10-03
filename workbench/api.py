@@ -55,6 +55,16 @@ def create_app(root, origin='http://127.0.0.1:8765'):
     async def template():
         path=Path(__file__).parent.parent/'examples/intake-template.xlsx'
         return Response(path.read_bytes(),media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',headers={'Content-Disposition':'attachment; filename="intake-template.xlsx"'})
+    @app.get('/api/preflight')
+    async def preflight():
+        from .preflight import inspect_workspace
+        return await asyncio.to_thread(inspect_workspace,c.root,coordinator_owned=True)
+    @app.get('/api/knowledge')
+    async def knowledge():
+        from .mainframe import load_knowledge
+        package=Path(__file__).parent.parent
+        return {'snapshot':load_knowledge(c.root),'application_template_path':str(package/'examples/application-knowledge.json'),
+                'application_path':str(c.root/'knowledge/application-knowledge.json'),'reference_path':str(package/'knowledge/README.md')}
     @app.post('/api/intake')
     async def intake(request:Request):
         b=await body(request)

@@ -1,5 +1,37 @@
 # Revision review and fixes
 
+## Additional knowledge, setup and failure analysis
+
+This follow-up added a visible standard/applications catalog, evidence-based
+classification, offline preflight, frozen per-process knowledge, UI inspection
+and explicit agent instructions. Independent reviewers reproduced the following
+issues; each is fixed and covered by regressions. Final integrated validation:
+**242 tests passed**, including the production HTTP workflow and automatic PPT.
+The final independent control/performance review passed 80 targeted tests in
+13.378 seconds without a release-blocking finding in the reviewed changes.
+
+| Finding | Resolution |
+|---|---|
+| Extension-only analysis missed extensionless members or trusted misleading suffixes | Structural evidence with conflicts/unknowns retained; compatible COPY/JCL dependencies resolved conservatively. |
+| Standard/custom utilities had no visible semantic contract | Versioned 17-family catalog, source/control-card requirements, editable application facts and unverified SME context; recognition never grants conversion support. |
+| Utilities absent from the manifest disappeared from utility findings | Actual anchored JCL invocations retained with path/line provenance, including unnamed steps and native national-character names. |
+| Mutable application knowledge could influence existing evidence | Validated snapshot and baseline frozen at intake; Resume and coverage use the original snapshot. |
+| Populated malformed Markdown/Excel rows were silently skipped | Every populated intake row is validated; missing identifiers, fractional/bool order values and normalized job collisions are rejected before intake. |
+| Exported target accepted malformed input while the harness pre-rejected it | New target contract embeds guards; every invalid record enters generated Python; guard mutations and job rejection behavior are tested. |
+| New guard ordering changed after canonical ledger serialization | Sorted version 2 field handling; target and case roundtrip regression; original version 1 fingerprints unchanged. |
+| Unused exports inflated selected portfolio counts | Selected versions derived from per-process membership; discovered inventory reported separately. |
+| SQL comments/literals inflated table references | New classification path masks comments/literals and labels conservative static references; no estate-inventory claim. |
+| New guard/knowledge work exceeded the original HTTP deadline | Compile each checked target once per suite/mutant and project small durable controls; retain every record/checkpoint; original deadline passes. |
+| Small newline-heavy input could create millions of coverage rows | Shared 100,000 aggregate physical-line bound enforced before immutable intake/analysis. No truncation. |
+| Setup could report success after diagnostic failure or erase custom knowledge | Explicit failures stop setup; initialization never overwrites application edits; preflight separates readiness from support/connectivity. |
+
+The operating matrix in `OPERATIONS.md` records native data, utility, scheduler,
+transaction, recovery and environmental requirements. The standard reference
+links IBM documentation; Zowe setup/read-only guidance was also checked through
+the user-requested Context7 plugin. All source operations remain read-only.
+
+## Earlier foundation review
+
 A fresh independent reviewer inspected the entire workbench and reproduced failures rather than accepting implementation-owner claims. All reproduced high/medium findings were fixed and independently rechecked. The reviewer ran 85 focused integration tests, then 51 final recovery/runner/coverage tests after the last corrections; both runs passed. Final integrated and transport checks are recorded in VALIDATION.md.
 
 | Finding | Fix and regression evidence |

@@ -9,16 +9,27 @@ HEADERS = ['Job order', 'Job', 'Step order', 'Step', 'Program or utility', 'Inpu
 def from_rows(pid, name, rows):
     identity(pid)
     require(isinstance(name, str) and 0 < len(name.strip()) <= 160, 'Process name is required and limited to 160 characters')
+    require(not any(ord(c) < 32 for c in name), 'Process name must be one line without control characters')
     require(0 < len(rows) <= 200, 'Supply between 1 and 200 job steps')
-    jobs, seen, orders = {}, set(), {}
+    jobs, seen, orders, methods = {}, set(), {}, {}
     for row in rows:
         require(len(row) == 8, 'Each job/step row must have eight columns')
-        try: jo, so = int(row[0]), int(row[2])
-        except (TypeError, ValueError) as exc: raise ValidationError('Job and step order must be positive integers') from exc
+        require(all(not isinstance(v,str) or (len(v)<=4096 and not any(c in v for c in '\r\n|')) for v in row),
+                'Intake cells must be single-line values without table delimiters, limited to 4096 characters')
+        def order(value):
+            require(type(value) is int or (isinstance(value,str) and re.fullmatch(r'[0-9]+',value.strip())),
+                    'Job and step order must be positive integers; every populated row needs both orders')
+            return int(value)
+        jo, so = order(row[0]), order(row[2])
         require(0 < jo <= 1000 and 0 < so <= 1000, 'Job/step order out of range')
-        job, step, program = map(lambda v: identity(str(v).strip()), (row[1], row[3], row[4]))
+        require(all(isinstance(row[i],str) and row[i].strip() for i in (1,3,4)), 'Every row needs a job, step and program or utility name')
+        job, step, program = map(lambda v: identity(v.strip()), (row[1], row[3], row[4]))
+        method=job.lower().replace('-','_')
+        require(method not in methods or methods[method]==job,
+                'Job names collide after case/hyphen normalization: '+job)
+        methods[method]=job
         require((job, so) not in seen, 'Duplicate step order within a job')
-        require(not any(s['name'] == step for s in jobs.get(job, {}).get('steps', [])), 'Duplicate step name within a job')
+        require(not any(s['name'].upper() == step.upper() for s in jobs.get(job, {}).get('steps', [])), 'Duplicate step name within a job (case-insensitive)')
         seen.add((job, so))
         require(jo not in orders or orders[jo] == job, 'Different jobs cannot share a job order')
         orders[jo] = job
@@ -36,14 +47,23 @@ def from_rows(pid, name, rows):
 def parse_manifest(text):
     require(isinstance(text, str) and len(text) <= 128000, 'Markdown intake is too large')
     def attr(label):
-        m = re.search(r'^\s*[-*]?\s*' + label + r'\s*:\s*`?([^`\n]+)`?\s*$', text, re.M | re.I)
-        require(m is not None, f'Missing {label}')
-        return m.group(1).strip()
-    rows = []
+        matches = re.findall(r'^\s*[-*]?\s*' + label + r'\s*:\s*`?([^`\n]+)`?\s*$', text, re.M | re.I)
+        require(len(matches)==1, f'Supply exactly one {label}')
+        return matches[0].strip()
+    rows = [];header=False
     for line in text.splitlines():
         if not line.strip().startswith('|'): continue
-        cells = [v.strip() for v in line.strip().strip('|').split('|')]
-        if cells and cells[0].isdigit(): rows.append(cells)
+        card=line.strip()[1:]
+        if card.endswith('|'):card=card[:-1]
+        cells = [v.strip() for v in card.split('|')]
+        if cells==HEADERS:
+            require(not header, 'Supply one job/step table; repeated headers are ambiguous')
+            header=True;continue
+        require(header, 'Provide the exact job/step table headers before every data row')
+        if len(cells)==8 and all(re.fullmatch(r':?-{3,}:?',v) for v in cells):continue
+        require(any(cells), 'Empty table rows are ambiguous; remove the row or provide its job and step')
+        rows.append(cells)
+    require(header, 'Provide the exact job/step table headers')
     return from_rows(attr('Process ID'), attr('Process name'), rows)
 
 
@@ -58,6 +78,9 @@ def parse_intake_xlsx(data):
         for row in ws:
             require(all(c.data_type != 'f' for c in row), 'Formulas are not accepted in intake')
         require([ws.cell(4,c).value for c in range(1,9)] == HEADERS, 'Intake headers changed')
-        rows = [[ws.cell(r,c).value for c in range(1,9)] for r in range(5,ws.max_row+1) if ws.cell(r,1).value is not None]
+        rows = []
+        for r in range(5,ws.max_row+1):
+            values=[ws.cell(r,c).value for c in range(1,9)]
+            if any(v is not None and (not isinstance(v,str) or v.strip()) for v in values):rows.append(values)
         return from_rows(str(ws['B1'].value or ''), str(ws['B2'].value or ''), rows)
     finally: book.close()

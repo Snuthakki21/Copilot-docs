@@ -61,9 +61,20 @@ def metrics(ledger, doc, coverage=None, portfolio_model=None):
 
 def portfolio(ledger):
     with ledger.lock:
-        assets=ledger.assets();p=ledger.list()
-    return {'processes':len(p),'unique_program_versions':sum(x['kind']=='cobol_program' for x in assets),
-        'unique_copybook_versions':sum(x['kind']=='copybook' for x in assets),
+        p=ledger.list()
+    # Scope belongs to a process membership, not to the first globally registered
+    # asset document. The same source version can be excluded by one process and
+    # selected by another. Keep discovered exports separate from selected scope.
+    discovered={};selected={}
+    for process in p:
+        for asset in (process.get('analysis') or {}).get('assets',[]):
+            discovered[asset['id']]=asset
+            if asset.get('selected',True):selected[asset['id']]=asset
+    return {'processes':len(p),'unique_program_versions':sum(x['kind']=='cobol_program' for x in selected.values()),
+        'unique_copybook_versions':sum(x['kind']=='copybook' for x in selected.values()),
+        'discovered_program_versions':sum(x['kind']=='cobol_program' for x in discovered.values()),
+        'discovered_copybook_versions':sum(x['kind']=='copybook' for x in discovered.values()),
+        'source_scope_basis':'Unique versions selected by at least one non-demo process; discovered versions include exported out-of-scope assets.',
         'program_memberships':sum(len((x.get('analysis') or {}).get('programs',{})) for x in p),
         'completed_processes':sum(x['status']=='COMPLETED' for x in p),'demo_excluded':True}
 
@@ -137,7 +148,7 @@ def generate_reports(ledger,doc,root,checkpoint=None):
         ['Verified platform replacement lines',m['source_platform_replaced_verified_lines']]],
         'coverage.json/CSV/XLSX/HTML preserve every original file and line with target spans, versions, tests and reasons. Line, semantic-unit and extracted-rule percentages use separate denominators.')
     pf=model['portfolio']
-    slide('Portfolio progress',[['Production processes',pf['processes']],['Unique source program versions',pf['unique_program_versions']],['Program memberships across processes',pf['program_memberships']],['Unique copybook versions',pf['unique_copybook_versions']],['Completed without blockers',pf['completed_processes']]],'Includes the current process outcome upon atomic report acceptance; demonstrations are excluded. Assets deduplicate by identity and source hash; memberships preserve reuse.')
+    slide('Portfolio progress',[['Production processes',pf['processes']],['Unique selected program versions',pf['unique_program_versions']],['Program memberships across processes',pf['program_memberships']],['Unique selected copybook versions',pf['unique_copybook_versions']],['Completed without blockers',pf['completed_processes']]],'Selected scope excludes unrelated exports; metrics.json lists discovered versions separately. Current completion is counted upon atomic report acceptance. Demonstrations are excluded; memberships preserve reuse.')
     slide('Evidence and decisions',[['Source snapshot',(doc.get('analysis') or {}).get('source_snapshot','Unavailable')[:20]],['SME review','One packet / one return per process'],['Expected vs actual','Frozen source IR vs executed Python'],['Open decisions',m['unresolved_blockers']],['Completion','WITH BLOCKERS' if m['report_final_status']=='COMPLETED_WITH_BLOCKERS' else 'Supported POC boundary verified']],'See metrics.json, source-analysis.json and each synthetic run for complete hashes, source spans, cases, actual results, differences and unresolved answers.')
     prs.save(root/'management.pptx')
     inspected=Presentation(root/'management.pptx');require(len(inspected.slides)==6,'Deck incomplete')

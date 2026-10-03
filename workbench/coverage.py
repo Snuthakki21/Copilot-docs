@@ -47,7 +47,7 @@ def _target(path, root, start, end):
 def _program_evidence(doc, root, base, name, p, global_errors, checkpoint=None):
     """Reproduce frozen expectations and compare complete stored target evidence."""
     from .fixtures import plan_cases, verify_program, adversarial_review
-    from .target import emit_program
+    from .target import emit_program, rule_nodes, layout_nodes
     state = {'verified':False, 'mappings':{}, 'tests':[], 'evidence':[], 'reason':'Verification is incomplete or unavailable.'}
     if p.get('blockers'):
         state['reason'] = 'Program contains unresolved source semantics; no complete target is credited.'
@@ -60,15 +60,20 @@ def _program_evidence(doc, root, base, name, p, global_errors, checkpoint=None):
         raw = _read(target); code = raw.decode('utf-8')
         require(sha(raw) == version and code == emit_program(p), 'Target differs from its pinned generated version')
         function = ast.parse(code).body[0]
-        for rule, node in zip(p['rules'], [n for n in function.body if isinstance(n, ast.If)]):
+        for rule, node in zip(p['rules'], rule_nodes(ast.parse(code), p)):
             state['mappings'][rule['id']] = _target(target, root, node.lineno, node.end_lineno)
-        returns = [n for n in ast.walk(function) if isinstance(n, ast.Return)]
-        state['mappings']['terminal'] = _target(target, root, returns[-1].lineno, returns[-1].end_lineno)
-        # The actual execution adapter validates the source field layout before Python execution.
-        from . import reference
-        adapter = Path(reference.__file__).resolve()
-        adapter_function = next(n for n in ast.parse(adapter.read_text()).body if isinstance(n, ast.FunctionDef) and n.name == 'input_errors')
-        state['mappings']['layout'] = _target(adapter, root, adapter_function.lineno, adapter_function.end_lineno)
+        terminal=function.body[-1]
+        require(isinstance(terminal,ast.Return),'Generated program is missing its terminal return')
+        state['mappings']['terminal'] = _target(target, root, terminal.lineno, terminal.end_lineno)
+        if p.get('target_contract_version') == 2:
+            guards=layout_nodes(ast.parse(code),p)
+            state['mappings']['layout']=_target(target,root,guards[0].lineno,guards[-1].end_lineno)
+        else:
+            # Historical evidence used a separate validation adapter; retain its mapping.
+            from . import reference
+            adapter = Path(reference.__file__).resolve()
+            adapter_function = next(n for n in ast.parse(adapter.read_text()).body if isinstance(n, ast.FunctionDef) and n.name == 'input_errors')
+            state['mappings']['layout'] = _target(adapter, root, adapter_function.lineno, adapter_function.end_lineno)
         require(not global_errors, 'Frozen process/evidence integrity failed; target replay and verified credit are prohibited')
         require(not doc.get('cancel_requested'), 'Cancelled: target execution prohibited; existing evidence is retained without new verification credit')
         require(doc.get('verification_finished'), 'Verification did not finish')
@@ -154,6 +159,12 @@ def _manifest_integrity(doc,base):
     manifest=parse_manifest(raw.decode('utf-8'))
     require(encode(manifest)==encode({key:doc.get(key) for key in ('id','name','jobs')}),
             'Frozen manifest identity/name/jobs differ from the pinned process document')
+    if 'mainframe_knowledge' in doc or 'analysis/mainframe-knowledge.json' in doc.get('artifact_hashes',{}):
+        from .mainframe import validate_snapshot
+        snapshot=doc.get('mainframe_knowledge');validate_snapshot(snapshot)
+        raw=_read(base/'analysis/mainframe-knowledge.json')
+        require(raw==encode(snapshot) and sha(raw)==doc.get('artifact_hashes',{}).get('analysis/mainframe-knowledge.json'),
+                'Frozen mainframe knowledge changed or is missing its recorded baseline')
 
 
 def _database_integrity(doc,root,base):
@@ -229,6 +240,7 @@ def build_coverage(doc, workspace_root, checkpoint=None):
         inventory.append({'path':path, 'kind':kind, 'source_hash':doc['source_files'][path],
                           'physical_lines':len(lines), 'selected':selected, 'scope_reason':None if selected else reason_scope,
                           'integrity_verified':source_ok[path], 'source_text':text})
+        if path in analysis.get('classifications',{}):inventory[-1]['classification']=analysis['classifications'][path]
         program_entry = by_path.get(path)
         current_job=None
         copy_lines=[]
@@ -300,6 +312,10 @@ def build_coverage(doc, workspace_root, checkpoint=None):
                 else: reason = 'Unsupported JCL card or clause; no scheduler or I/O replacement is inferred.'
             elif kind == 'bms_map': reason = 'BMS/CICS screen behavior requires concrete action and screen mapping plus verification; no business UI replacement exists.'
             elif kind == 'sql': reason = 'Source SQL/database effects have no executable target mapping or verified database adapter.'
+            elif kind == 'other_source' and path in analysis.get('classifications',{}):
+                classification=analysis['classifications'][path]
+                reason='Classified as '+classification['kind']+'; recognition is not executable conversion. Source behavior requires a supported adapter and verification evidence.'
+                if classification.get('conflicts'):reason+=' Conflicting evidence: '+ '; '.join(classification['conflicts'])
             if state and mapping_key:
                 m = state['mappings'].get(mapping_key)
                 if m: mappings = [m]

@@ -26,6 +26,7 @@ reject escapes, sibling process writes and misplaced output before writing.
 | `processes/PROCESS_ID/input/sme-return-inbox.xlsx` | The single designated automatic return inbox. Requires explicit actual `--reviewer` attribution. |
 | `processes/PROCESS_ID/input/sme-return.xlsx` | Service-preserved accepted return. Never place a workbook here manually. |
 | `processes/PROCESS_ID/analysis/` | Structured analysis and source accounting, including reasons for unknown/unsupported/omitted lines. |
+| `processes/PROCESS_ID/analysis/mainframe-knowledge.json` | Immutable standard/application knowledge snapshot used for that process; validated against its creation-time hash. |
 | `processes/PROCESS_ID/review/` | Frozen `packet.json` and the one `sme-checklist.xlsx`, `.docx`, `.html`. |
 | `processes/PROCESS_ID/synthetic/run-NNNN/` | Versioned source-derived expected outputs, actual results and comparisons. |
 | `processes/PROCESS_ID/target/run-NNNN/` | Versioned generated programs, job orchestration and local target database. |
@@ -34,7 +35,9 @@ reject escapes, sibling process writes and misplaced output before writing.
 | `processes/PROCESS_ID/tests/` | Process-specific structured regression evidence. Repository test implementations stay in `tests/`. |
 | `shared/target/python/HASH.py` | Content-addressed shared target versions. A version is never replaced in place. |
 | `knowledge/inbox/context.md` | Optional bounded unverified background; never approval or verification. |
-| `knowledge/records.json`, `knowledge/INDEX.md` | Canonical provenance-bound structured approved knowledge and one compact index. |
+| `knowledge/mainframe-catalog.json`, `knowledge/README.md` | Versioned standard classifications, utilities, native-semantic checklist and official references. |
+| `knowledge/application-knowledge.json` | Editable private application/vendor utility knowledge, initialized from `examples/application-knowledge.json`; future intakes freeze edits. |
+| `knowledge/records.json`, `knowledge/INDEX.md` | Canonical provenance-bound SME-confirmed interpretations and one compact index; target verification is separate. |
 | `workbench/`, `frontend/`, `tests/`, `tools/`, `scripts/`, `docs/`, `prompts/`, `examples/`, `.github/` | Repository implementation, verification, entrypoints, instructions, synthetic examples and GitHub/Copilot metadata. |
 
 Process IDs are stable, validated identifiers beginning with a letter. Process

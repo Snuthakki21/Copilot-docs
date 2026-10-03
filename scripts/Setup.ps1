@@ -21,5 +21,7 @@ if (-not (Test-Path -LiteralPath $venvPython -PathType Leaf)) {
 if ($LASTEXITCODE -ne 0) { throw 'Existing .venv must use Python 3.12. Rename it, then rerun Setup.ps1 to create a compatible environment.' }
 & $venvPython -m pip --disable-pip-version-check --no-input install --require-hashes --only-binary=:all: -r requirements.lock
 if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed. Check access to pypi.org/files.pythonhosted.org and wheel availability for CPython 3.12; no unverified source build was attempted.' }
+& $venvPython -m workbench.preflight --workspace (Get-Location).Path --initialize-knowledge
+if ($LASTEXITCODE -ne 0) { throw 'Setup checks found blockers. Follow the diagnostic actions above, then rerun setup; existing application knowledge was preserved.' }
 New-Item -ItemType Directory -Force Endeavor,knowledge/inbox | Out-Null
-Write-Host 'Setup complete. Put sources in Endeavor; run scripts/Start.ps1.'
+Write-Host 'Setup complete. Put sources in Endeavor, review knowledge/application-knowledge.json, then run scripts/Start.ps1.'

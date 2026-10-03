@@ -16,6 +16,6 @@ def update_knowledge(ledger, process):
     import json
     records=[json.loads(r[0]) for r in rows]
     atomic_json(ledger.root/'knowledge'/'records.json',records)
-    index='# Verified knowledge index\n\n'+str(len(records))+' provenance-bound records. Canonical structured records: records.json.\n\n'+'\n'.join('- '+r['rule_id']+': '+r['statement'] for r in records)
+    index='# SME-confirmed knowledge index\n\n'+str(len(records))+' provenance-bound interpretations; target verification is separate. Canonical structured records: records.json.\n\n'+'\n'.join('- '+r['rule_id']+': '+r['statement'] for r in records)
     (ledger.root/'knowledge'/'INDEX.md').write_text(index,encoding='utf-8')
     return len(records)

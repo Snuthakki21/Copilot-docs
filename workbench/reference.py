@@ -3,9 +3,10 @@
 
 def input_errors(program, record):
     errors=[]
-    if not isinstance(record,dict):return ['record must be an object']
+    if (type(record) is not dict if program.get('target_contract_version') == 2 else not isinstance(record,dict)):return ['record must be an object']
     if set(record)!=set(program['fields']):errors.append('field set differs from source layout')
-    for name,f in program['fields'].items():
+    fields = sorted(program['fields'].items()) if program.get('target_contract_version') == 2 else program['fields'].items()
+    for name,f in fields:
         value=record.get(name)
         if f['type']=='integer':
             if type(value) is not int or not 0<=value<=f['max']:errors.append(name+': invalid unsigned integer')

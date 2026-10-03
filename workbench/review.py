@@ -50,6 +50,19 @@ def packet_document(process):
     context_data={'jobs':process['jobs'],'layouts':{n:p['fields'] for n,p in a['programs'].items()},'relationships':a['relationships'],'knowledge_input':process.get('knowledge_context')}
     items += [{'id':k,'question':q,'evidence':'See process inventory/layout/relationship context','kind':'process_assumption'} for k,q in GLOBAL_QUESTIONS]
     if process.get('knowledge_context'):items.append({'id':'G_KNOWLEDGE','question':'Is the supplied background knowledge correct and applicable to this process? If No, describe the correction.','evidence':'See knowledge_input context and its SHA256','kind':'process_assumption'})
+    if process.get('mainframe_knowledge'):
+        context_data['file_classifications']=a.get('classifications',{})
+        context_data['utility_findings']=a.get('utility_findings',[])
+        context_data['application_knowledge']={'status':'UNVERIFIED_INPUT',**process['mainframe_knowledge']['application']}
+        context_data['mainframe_knowledge_snapshot']='analysis/mainframe-knowledge.json'
+        context_data['mainframe_knowledge_sha256']=sha(encode(process['mainframe_knowledge']))
+        checks=[
+            ('G_FILE_TYPES','Are the listed file types and dependencies correct, including source, copybooks, JCL/PROCs, control cards, screens and data definitions? If No, name the missing or misclassified file.'),
+            ('G_UTILITIES','Does the utility list include every standard, vendor and application utility this process calls? If No, give its name, purpose, inputs, outputs and return codes.'),
+            ('G_NATIVE_DATA','Do the provided layouts fully describe record formats, encodings, keys, signs, decimal precision and matching rules? If No, describe the missing format or rule, including empty, duplicate and missing records.'),
+            ('G_NATIVE_RUNTIME','Do the listed jobs fully describe runtime behavior, including control cards, DD allocation/deletion, conditional steps, restart, transactions, scheduling and external calls? If No, describe the missing behavior.'),
+        ]
+        items += [{'id':key,'question':question,'evidence':'See file_classifications, utility_findings, jobs and layouts in Context; recognition alone is not conversion proof.','kind':'mainframe_assumption'} for key,question in checks]
     suggestions=process.get('llm',{}).get('analysis',{})
     for n,text in enumerate(suggestions.get('questions',[])+suggestions.get('assumptions',[])):
         items.append({'id':f'LLM_{n:03d}','question':text,'evidence':'Unverified LLM suggestion; validate against source/context','kind':'provider_suggestion'})

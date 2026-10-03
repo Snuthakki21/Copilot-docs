@@ -91,8 +91,8 @@ def validate_workspace(root):
     knowledge = root / 'knowledge'
     if knowledge.is_dir() and not knowledge.is_symlink():
         for child in knowledge.iterdir():
-            if child.name not in {'inbox', 'records.json', 'INDEX.md'}:
-                issues.append(child.relative_to(root).as_posix() + ': knowledge belongs in the canonical index/records or inbox')
+            if child.name not in {'inbox', 'records.json', 'INDEX.md', 'mainframe-catalog.json', 'application-knowledge.json', 'README.md'}:
+                issues.append(child.relative_to(root).as_posix() + ': knowledge belongs in the standard/application catalog, canonical index/records or inbox')
     return sorted(set(issues))
 
 

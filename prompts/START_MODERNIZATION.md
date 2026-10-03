@@ -27,6 +27,18 @@ substitute agent reasoning for reviewer approval.
    misplaced files without moving or editing frozen source/evidence. Stop on
    missing intake facts, unsafe paths, failed preflight or another writer;
    diagnose the named cause rather than bypassing a gate.
+   Read `knowledge/README.md`, `knowledge/mainframe-catalog.json`, the workspace's
+   `knowledge/application-knowledge.json` when supplied, and `docs/OPERATIONS.md`.
+   Run `python -m workbench.preflight --workspace WORKSPACE --manifest MANIFEST --json`.
+   Resolve local setup/intake blockers before Start. A blocked conversion profile
+   may still be analyzed and reported, but cannot be declared converted. Keep
+   configuration, reachability, classification and verified support distinct.
+   Classify from source structure and dependency evidence; names/suffixes alone
+   are insufficient. Check the native-semantic topics and every utility's
+   required evidence, including wrappers and control cards. Use the visible
+   application catalog for custom facts, preserving unknowns and provenance.
+   A catalog entry never authorizes an adapter or execution. Every new process
+   freezes its exact knowledge; Resume must use that original snapshot.
 2. Execute:
 
    ```sh
@@ -87,6 +99,13 @@ substitute agent reasoning for reviewer approval.
    feature by default. Mainframe-specific/platform behavior needs a concrete
    replacement and verification evidence before it can be credited.
    Source-derived oracles do not establish observed mainframe parity.
+   Include classification conflicts, custom utility details, record formats and
+   runtime assumptions in the existing single checklist before its issue. The
+   service includes these in Context. SME approval cannot turn an unsupported
+   construct into supported code. Preserve corrections as unresolved facts;
+   do not silently convert prose into executable semantics. New generated target
+   contracts validate their own inputs; regression tests must call the exported
+   target on malformed inputs rather than pre-rejecting them in a test harness.
    Run real regression tests for any engine changes and perform an adversarial
    review before claiming completion. Inspect unmet gates rather than relying
    on a green label alone. Preserve failed and blocked evidence.

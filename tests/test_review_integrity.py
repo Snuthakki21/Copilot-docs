@@ -300,6 +300,10 @@ if [[ \"$1 $2\" == '-m pip' ]]; then
     echo \"pip:$*\" >> \"$FAKE_LOG\"
     exit \"${FAKE_PIP_EXIT:-0}\"
 fi
+if [[ \"$1 $2\" == '-m workbench.preflight' ]]; then
+    echo \"preflight:$*\" >> \"$FAKE_LOG\"
+    exit \"${FAKE_PREFLIGHT_EXIT:-0}\"
+fi
 exit 9
 """)
         self.interpreter.chmod(0o755)
@@ -322,6 +326,9 @@ exit 9
         pip_calls = [line for line in calls if line.startswith('pip:')]
         self.assertEqual(len(pip_calls), 2)
         self.assertTrue(all('--require-hashes' in line and '--only-binary=:all:' in line for line in pip_calls))
+        preflight_calls=[line for line in calls if line.startswith('preflight:')]
+        self.assertEqual(len(preflight_calls),2)
+        self.assertTrue(all('--initialize-knowledge' in line and '--workspace' in line for line in preflight_calls))
         self.assertTrue((self.root / 'Endeavor').is_dir())
         self.assertTrue((self.root / 'knowledge/inbox').is_dir())
 
@@ -349,6 +356,13 @@ exit 9
         result = self.run_setup(FAKE_VENV_EXIT='27')
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse(any(line.startswith('pip:') for line in self.log.read_text().splitlines()))
+
+    def test_failed_preflight_stops_before_reporting_success(self):
+        result=self.run_setup(FAKE_PREFLIGHT_EXIT='2')
+        self.assertNotEqual(result.returncode,0)
+        self.assertNotIn('Setup complete',result.stdout)
+        self.assertIn('Setup checks found blockers',result.stderr)
+        self.assertFalse((self.root/'Endeavor').exists())
 
 
 if __name__ == '__main__':

@@ -73,8 +73,11 @@ class Coordinator:
         if source_files is None:
             folder=self.root/'Endeavor';source_files={}
             if folder.exists():
-                for path in folder.rglob('*'):
+                require(folder.is_dir(),'Endeavor must be a source-export directory')
+                for entry,path in enumerate(folder.rglob('*'),1):
+                    require(entry<=10000,'Source directory traversal exceeds 10,000 entries; provide a process-scoped export')
                     require(not path.is_symlink(),'Symlinks are not accepted in Endeavor')
+                    require(path.is_dir() or path.is_file(),'Endeavor accepts only regular source files and directories')
                     if path.is_file():
                         relative=path.relative_to(folder).as_posix()
                         require(path.stat().st_size<=512000 and len(source_files)<200,'Endeavor export exceeds bounds: '+relative)
@@ -82,6 +85,9 @@ class Coordinator:
                         except UnicodeError as exc:raise ValidationError('Endeavor file is not UTF-8 text: '+relative+'; supply a readable export for explicit source accounting') from exc
         require(isinstance(source_files,dict) and 0<len(source_files)<=200,'Provide a source folder with 1 to 200 supported text files')
         require(all(isinstance(k,str) and isinstance(v,str) for k,v in source_files.items()),'Source filenames and contents must be text')
+        require(all('\x00' not in value for value in source_files.values()),'Source contains NUL/binary content; provide readable source separately from data/load modules')
+        from .domain import MAX_SOURCE_LINES
+        require(sum(len(value.splitlines()) for value in source_files.values())<=MAX_SOURCE_LINES,'Source export exceeds 100,000 physical lines; provide a process-scoped export before generating coverage')
         require(isinstance(prompt,str),'Analysis prompt must be text')
         try:
             encoded_sources={path:text.encode('utf-8') for path,text in source_files.items()}
@@ -89,9 +95,21 @@ class Coordinator:
             encoded_manifest=manifest_text.encode('utf-8');prompt.encode('utf-8')
         except UnicodeError as exc:raise ValidationError('Source filenames, source text, manifest and prompt must be valid UTF-8 text without unpaired surrogates') from exc
         require(sum(len(raw) for raw in encoded_sources.values())<=8*1024*1024,'Source export exceeds size bound')
+        # Reject collisions before any immutable process evidence is created.
+        import unicodedata
+        portable={}
+        for path in source_files:
+            require(Path(path).as_posix()==path and all(part not in ('','.','..') for part in path.split('/')),'Source paths must be canonical relative filenames')
+            folded=unicodedata.normalize('NFC',path).casefold()
+            require(folded not in portable,'Source filenames collide across supported platforms: '+path)
+            portable[folded]=path
+        require(not any('/'.join(path.split('/')[:i]) in portable for path in portable for i in range(1,len(path.split('/')))), 'Source file/directory names collide across supported platforms')
+        from .mainframe import load_knowledge
+        knowledge=load_knowledge(self.root)
         with self.lock:
             require_layout(self.root)
             require(not self.process_root(manifest['id']).exists(),'Process directory already exists')
+            require(not any(p.name.casefold()==manifest['id'].casefold() for p in (self.root/'processes').glob('*')),'Process ID collides on case-insensitive platforms; use a unique ID')
             for path,text in source_files.items():
                 output_path(self.root,manifest['id'],'input/sources/'+path)
                 require(len(encoded_sources[path])<=512000,'Source file exceeds bounds: '+path)
@@ -101,6 +119,9 @@ class Coordinator:
                 hashes={}
                 for path,raw in encoded_sources.items():hashes[path]=write_new(output_path(self.root,doc['id'],'input/sources/'+path),raw)
                 doc['source_files']=hashes;doc['manifest_hash']=sha(encoded_manifest);doc['prompt']=prompt[:16000]
+                doc['mainframe_knowledge']=knowledge
+                write_new(base/'analysis'/'mainframe-knowledge.json',encode(knowledge))
+                self.register(doc,'analysis/mainframe-knowledge.json')
                 return self.ledger.save(doc)
             except Exception:
                 doc['blockers']=[{'kind':'intake_storage','message':'Input storage failed; preserved available evidence.'}];self.ledger.save(doc,'FAILED');raise
@@ -138,7 +159,7 @@ class Coordinator:
     def checkpoint(self,doc,status=None,persist=True):
         """Accept durable controls under a short lock; workers never overwrite them."""
         with self.lock:
-            current=self.ledger.get(doc['id'])
+            current=self.ledger.get(doc['id']) if persist or status else self.ledger.controls(doc['id'])
             interrupted=current['status']=='PAUSED' or (current.get('cancel_requested') and doc.get('_active_stage')!='QUEUED_REPORT') or self.closed
             for key in ('control_revision','cancel_requested','resume_status'):
                 if key in current:doc[key]=current[key]
@@ -196,6 +217,12 @@ class Coordinator:
         require(sha(raw)==doc['manifest_hash'],'Frozen process manifest changed; existing evidence cannot be credited')
         frozen=parse_manifest(raw.decode('utf-8'))
         require(all(frozen[key]==doc[key] for key in ('id','name','jobs')),'Process metadata differs from the frozen manifest')
+        if 'mainframe_knowledge' in doc or 'analysis/mainframe-knowledge.json' in doc.get('artifact_hashes',{}):
+            from .mainframe import validate_snapshot
+            snapshot=doc.get('mainframe_knowledge');validate_snapshot(snapshot)
+            relative='analysis/mainframe-knowledge.json'
+            raw=output_path(self.root,doc['id'],relative).read_bytes()
+            require(raw==encode(snapshot) and sha(raw)==doc.get('artifact_hashes',{}).get(relative),'Frozen mainframe knowledge changed; preserve the original process evidence')
 
     def review_integrity(self,doc):
         self.manifest_integrity(doc)
@@ -270,7 +297,14 @@ class Coordinator:
         doc.setdefault('llm',{'status':'NOT_CONFIGURED','live_ready':False})
         if self.provider and doc['llm']['status']=='NOT_CONFIGURED':
             try:
-                excerpts=('\n'.join(p['source_text'] for p in analysis['programs'].values())+'\nUnverified background knowledge:\n'+doc.get('knowledge_context',{}).get('text',''))[:16000]
+                context=''
+                if doc.get('mainframe_knowledge'):
+                    facts={'status':'UNVERIFIED_CONTEXT_NOT_CONVERSION_PROOF',
+                           'classifications':{path:record['kind'] for path,record in analysis.get('classifications',{}).items()},
+                           'utility_findings':analysis.get('utility_findings',[]),
+                           'application':doc['mainframe_knowledge']['application']}
+                    context='Frozen mainframe context (bounded excerpt; full facts are in the SME packet):\n'+json.dumps(facts,ensure_ascii=False)[:4000]+'\nSource excerpts:\n'
+                excerpts=(context+'\n'.join(p['source_text'] for p in analysis['programs'].values())+'\nUnverified background knowledge:\n'+doc.get('knowledge_context',{}).get('text',''))[:16000]
                 doc['llm']={'status':'ANALYSIS_RETURNED',**self.provider.analyze(excerpts,doc.get('prompt') or 'Review this process and identify assumptions for its one SME checklist.')}
             except ValidationError as exc:
                 doc['llm']={'status':'UNAVAILABLE','message':str(exc),'live_ready':False}
@@ -348,7 +382,7 @@ class Coordinator:
                 for name,result in run['programs'].items():db.executemany('INSERT INTO results VALUES(?,?,?)',[(name,r['case_id'],json.dumps(r['result'])) for r in result['actual']])
         finally:db.close()
         self.register(doc,f'target/{run_id}/target.sqlite')
-        if len(doc['program_versions'])==len(doc['analysis']['programs']) and not any(b['kind'] in ('missing_source','unresolved_condition','unsupported_jcl') for b in doc['blockers']):
+        if len(doc['program_versions'])==len(doc['analysis']['programs']) and not any(b['kind'] in ('missing_source','unresolved_condition','unsupported_jcl','scope_mismatch','unsupported_utility','source_classification','unsupported_source') for b in doc['blockers']):
             jobs=emit_jobs(doc,doc['program_versions']);write_new(root/'target'/run_id/'jobs.py',jobs.encode());self.register(doc,f'target/{run_id}/jobs.py')
             from .orchestration import verify_jobs
             self.checkpoint(doc)

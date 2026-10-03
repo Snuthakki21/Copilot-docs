@@ -17,5 +17,6 @@ if [[ ! -x .venv/bin/python ]]; then
 fi
 .venv/bin/python -c 'import sys; sys.exit(0 if sys.version_info[:2] == (3, 12) else 1)' || fail 'Existing .venv must use Python 3.12. Rename it, then rerun setup to create a compatible environment.'
 .venv/bin/python -m pip --disable-pip-version-check --no-input install --require-hashes --only-binary=:all: -r requirements.lock || fail 'Dependency installation failed. Check access to pypi.org/files.pythonhosted.org and wheel availability for CPython 3.12; no unverified source build was attempted.'
+.venv/bin/python -m workbench.preflight --workspace "$PWD" --initialize-knowledge || fail 'Setup checks found blockers. Follow the diagnostic actions above, then rerun setup; existing application knowledge was preserved.'
 mkdir -p Endeavor knowledge/inbox
-printf '%s\n' 'Setup complete. Put sources in Endeavor; run .venv/bin/python -m workbench from this directory.'
+printf '%s\n' 'Setup complete. Put sources in Endeavor, review knowledge/application-knowledge.json, then run .venv/bin/python -m workbench from this directory.'

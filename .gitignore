@@ -4,6 +4,7 @@ Endeavor/
 knowledge/inbox/
 knowledge/INDEX.md
 knowledge/records.json
+knowledge/application-knowledge.json
 .env
 .venv/
 node_modules/
