@@ -8,6 +8,6 @@ This is the preserved historical version 1 fixture; it predates the frozen
 mainframe catalog and embedded target input guards. Do not rewrite its evidence
 in place. Run the tool in a fresh workspace to exercise the current version 2
 targets, editable application catalog and classification workflow. Current
-regression results are in `../VALIDATION.md`.
+regression results are in [the current executive report](../docs/executive-report.html).
 
 The isolated fixture intentionally exercises ordinary portfolio counting, so its two processes/one shared program are fixture metrics, not actual production inventory. This exported evidence has no workflow ledger; use a fresh test workspace to reproduce, not Resume inside this folder. PowerPoint structure and all six Artifact Tool renderings were inspected. Native PowerPoint/Windows and browser rendering remain unverified.

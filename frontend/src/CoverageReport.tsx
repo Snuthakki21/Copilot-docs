@@ -5,6 +5,7 @@ type Report={summary:any;files:{path:string;selected:boolean;scope_reason?:strin
 
 export function CoverageReport({processId,status}:{processId?:string;status?:string}){
  const [report,setReport]=useState<Report|null>(null),[error,setError]=useState(''),[file,setFile]=useState(''),[disposition,setDisposition]=useState('');
+ useEffect(()=>{setFile('');setDisposition('');},[processId]);
  useEffect(()=>{let active=true;setReport(null);setError('');if(!processId)return;fetch(`/api/process/${processId}/coverage`).then(async r=>{const d=await r.json();if(!r.ok)throw Error(d.error||'Coverage unavailable');if(active)setReport(d);}).catch(e=>{if(active)setError(String(e));});return()=>{active=false;};},[processId,status]);
  if(!processId)return <section><h2>Complete source coverage</h2><p>Select a process to see the source-to-target accounting.</p></section>;
  if(error)return <section><h2>Complete source coverage</h2><p role="alert">{error}</p></section>;

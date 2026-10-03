@@ -3,6 +3,7 @@ import argparse
 import json
 from pathlib import Path
 import re
+import unicodedata
 from .domain import ValidationError, identity, require, safe_path
 
 ROOT_FILES = frozenset({
@@ -55,11 +56,24 @@ def validate_workspace(root):
             issues.append(child.name + ': root file is not allowlisted')
         elif child.is_dir() and child.name not in ROOT_DIRS:
             issues.append(child.name + ': root directory is not allowlisted')
+        elif not child.is_file() and not child.is_dir():
+            issues.append(child.name + ': root entries must be regular files or directories')
     for category in ('Endeavor', 'processes', 'shared', 'knowledge'):
         folder = root / category
         if not folder.is_dir() or folder.is_symlink(): continue
+        identities={}
         for path in folder.rglob('*'):
-            if path.is_symlink(): issues.append(path.relative_to(root).as_posix() + ': symlinks are not allowed')
+            relative=path.relative_to(root).as_posix()
+            key=unicodedata.normalize('NFC',relative).casefold()
+            if key in identities and identities[key]!=relative:
+                issues.append(relative + ': portable path identity collides with ' + identities[key])
+            identities[key]=relative
+            if path.is_symlink(): issues.append(relative + ': symlinks are not allowed')
+            elif not path.is_file() and not path.is_dir():
+                issues.append(relative + ': entries must be regular files or directories')
+            else:
+                try: safe_path(root,relative)
+                except ValidationError as exc: issues.append(relative + ': ' + str(exc))
     processes = root / 'processes'
     if processes.is_dir() and not processes.is_symlink():
         for process in sorted(processes.iterdir()):
@@ -71,6 +85,10 @@ def validate_workspace(root):
                 if child.name not in PROCESS_DIRS or not child.is_dir():
                     issues.append(child.relative_to(root).as_posix() + ': misplaced process output')
             for path in process.rglob('*'):
+                if path.is_dir() and not path.is_symlink():
+                    parts=path.relative_to(process).parts
+                    if len(parts)>1 and parts[0]=='input' and parts[1]!='sources':
+                        issues.append(path.relative_to(root).as_posix() + ': input subdirectories belong under input/sources')
                 if not path.is_file() or path.is_symlink(): continue
                 try: output_path(root, process.name, path.relative_to(process).as_posix())
                 except ValidationError as exc: issues.append(path.relative_to(root).as_posix() + ': ' + str(exc))

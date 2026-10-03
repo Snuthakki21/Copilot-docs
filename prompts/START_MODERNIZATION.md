@@ -4,7 +4,7 @@ This is the single execution prompt for GitHub Copilot, Claude Code and other
 agents. Repository entrypoints: [AGENTS.md](../AGENTS.md) and
 [CLAUDE.md](../CLAUDE.md), with automatic Copilot repository instructions in
 [.github/copilot-instructions.md](../.github/copilot-instructions.md). Folder contract:
-[docs/WORKSPACE_LAYOUT.md](../docs/WORKSPACE_LAYOUT.md).
+[docs/TECHNICAL_REFERENCE.md](../docs/TECHNICAL_REFERENCE.md).
 
 You are operating the existing service-backed modernization workbench. Execute
 the workflow using its Coordinator CLI and deliver its concrete artifacts.
@@ -28,7 +28,7 @@ substitute agent reasoning for reviewer approval.
    missing intake facts, unsafe paths, failed preflight or another writer;
    diagnose the named cause rather than bypassing a gate.
    Read `knowledge/README.md`, `knowledge/mainframe-catalog.json`, the workspace's
-   `knowledge/application-knowledge.json` when supplied, and `docs/OPERATIONS.md`.
+   `knowledge/application-knowledge.json` when supplied, and `docs/TECHNICAL_REFERENCE.md`.
    Run `python -m workbench.preflight --workspace WORKSPACE --manifest MANIFEST --json`.
    Resolve local setup/intake blockers before Start. A blocked conversion profile
    may still be analyzed and reported, but cannot be declared converted. Keep
@@ -128,7 +128,10 @@ substitute agent reasoning for reviewer approval.
    comparisons and the management PowerPoint where generated.
    The HTTP UI and CLI share a single-writer lock: stop the other writer before
    switching transports, or use the currently running UI/API.
-8. Deliver the report and bundle paths with a precise result. Distinguish
+8. Deliver one primary `executive-report.html` with simple counts and next actions.
+   Keep the management PPT and evidence bundle available on request. Do not
+   produce another narrative Markdown report. Historical reports lacking the
+   new executive report remain unchanged. Include a precise result. Distinguish
    `COMPLETED`, `COMPLETED_WITH_BLOCKERS`, cancelled, failed and timed-out work.
    Name unresolved behavior and coverage gaps. Never assert zero bugs,
    production readiness, full mainframe parity or verification unsupported by

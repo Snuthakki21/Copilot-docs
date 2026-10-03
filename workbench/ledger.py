@@ -67,17 +67,31 @@ class Ledger:
         result['blockers']=[{'kind':'cancelled','message':'Operator cancelled this process'}] if result.get('cancel_requested') else []
         return result
 
-    def save(self, doc, status=None):
+    def _save(self, doc, status=None):
+        """Write inside the caller's transaction without committing it early."""
         pid = identity(doc['id'])
         canonical = {k:v for k,v in doc.items() if k not in {'status','packet_issued','packet_imported','packet_hash','created','updated'}}
+        require(self.db.execute('SELECT 1 FROM processes WHERE id=?', (pid,)).fetchone(), 'Process not found')
+        self.db.execute('UPDATE processes SET document=?,status=COALESCE(?,status),updated=? WHERE id=?', (encode(canonical).decode(), status, now(), pid))
+
+    def save(self, doc, status=None):
         with self.lock, self.db:
-            require(self.db.execute('SELECT 1 FROM processes WHERE id=?', (pid,)).fetchone(), 'Process not found')
-            self.db.execute('UPDATE processes SET document=?,status=COALESCE(?,status),updated=? WHERE id=?', (encode(canonical).decode(), status, now(), pid))
-        return self.get(pid)
+            self._save(doc, status)
+        return self.get(doc['id'])
+
+    def save_event(self, doc, status, stage, message, payload=None):
+        """Commit an operator transition and its audit record as one unit."""
+        with self.lock, self.db:
+            self._save(doc, status)
+            self._event(doc['id'], stage, message, payload)
+        return self.get(doc['id'])
+
+    def _event(self, pid, stage, message, payload=None):
+        self.db.execute('INSERT INTO events(process_id,stage,message,payload,created) VALUES(?,?,?,?,?)', (pid,stage,message,encode(payload or {}).decode(),now()))
 
     def event(self, pid, stage, message, payload=None):
         with self.lock, self.db:
-            self.db.execute('INSERT INTO events(process_id,stage,message,payload,created) VALUES(?,?,?,?,?)', (pid,stage,message,encode(payload or {}).decode(),now()))
+            self._event(pid, stage, message, payload)
 
     def events(self, pid, after=0):
         with self.lock: rows = self.db.execute('SELECT * FROM events WHERE process_id=? AND seq>? ORDER BY seq LIMIT 2000', (pid,after)).fetchall()
@@ -105,6 +119,7 @@ class Ledger:
             canonical = {k:v for k,v in doc.items() if k not in {'status','packet_issued','packet_imported','packet_hash','created','updated'}}
             cur = self.db.execute('UPDATE processes SET packet_imported=1,document=?,status=?,updated=? WHERE id=? AND packet_imported=0', (encode(canonical).decode(),'QUEUED_VERIFY',now(),pid))
             require(cur.rowcount == 1, 'SME return already consumed')
+            self._event(pid, 'review', 'One SME return imported; automatic continuation queued')
 
     def register_assets(self, pid, assets):
         with self.lock, self.db:
@@ -136,10 +151,13 @@ class Ledger:
         pid=identity(doc['id'])
         canonical={k:v for k,v in doc.items() if k not in {'status','packet_issued','packet_imported','packet_hash','created','updated'}}
         metric_text=encode(metrics).decode()
-        status='COMPLETED_WITH_BLOCKERS' if doc['blockers'] else 'COMPLETED'
+        status='COMPLETED_WITH_BLOCKERS' if doc['blockers'] or doc.get('cancel_requested') else 'COMPLETED'
         with self.lock, self.db:
             current=self.get(pid)
             require(current['status']=='REPORTING','Report completion requires the active reporting stage')
+            require(current.get('control_revision',0)==doc.get('control_revision',0)
+                    and bool(current.get('cancel_requested'))==bool(doc.get('cancel_requested')),
+                    'Report completion cannot replace newer operator controls')
             require(doc.get('report_verified') is True and bool(doc.get('report_hashes')),
                     'Report completion requires inspected report evidence')
             require(all(doc.get('artifact_hashes',{}).get(path)==fingerprint

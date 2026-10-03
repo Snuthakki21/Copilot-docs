@@ -2,8 +2,11 @@
 import base64
 import secrets
 import asyncio
+import html
+import re
 from contextlib import asynccontextmanager
 from pathlib import Path
+from urllib.parse import quote, urlencode
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import Response, JSONResponse
 from .coordinator import Coordinator
@@ -31,28 +34,48 @@ def create_app(root, origin='http://127.0.0.1:8765'):
             except Exception:response=JSONResponse({'error':'Operation failed; inspect the local event ledger'},500)
         response.headers['Cache-Control']='no-store'
         response.headers['X-Content-Type-Options']='nosniff'
-        response.headers['Content-Security-Policy']="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+        if 'Content-Security-Policy' not in response.headers:
+            response.headers['Content-Security-Policy']="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
         return response
     @app.exception_handler(ValidationError)
     async def invalid(request,exc):return JSONResponse({'error':str(exc)},400)
-    async def body(request):
+    async def body(request, limit=12*1024*1024):
         raw=bytearray()
         async for chunk in request.stream():
-            if len(raw)+len(chunk)>12*1024*1024:raise HTTPException(413,'Request exceeds 12 MiB')
+            if len(raw)+len(chunk)>limit:raise HTTPException(413,'Request exceeds the permitted size')
             raw.extend(chunk)
-        result=decode(bytes(raw),12*1024*1024);require(isinstance(result,dict),'Request must be a JSON object');return result
+        result=decode(bytes(raw),limit);require(isinstance(result,dict),'Request must be a JSON object');return result
     def display_process(doc):
         # Polling never repeats full synthetic record bodies. Evidence is downloaded on demand.
         result=dict(doc)
         result['runs']=[{k:v for k,v in run.items() if k!='programs'}|{'programs':{name:{k:v for k,v in r.items() if k not in ('actual','differences')}|{'case_count':len(r['actual']),'difference_count':len(r['differences'])} for name,r in run['programs'].items()}} for run in doc['runs']]
         if doc.get('analysis'):
-            result['analysis']={k:v for k,v in doc['analysis'].items() if k!='programs'}
+            accounting=doc['analysis'].get('source_accounting')
+            result['analysis']={k:v for k,v in doc['analysis'].items() if k not in ('programs','source_accounting')}
+            result['analysis'].update(source_accounted_file_count=len(accounting) if isinstance(accounting,dict) else None,
+                                      source_accounted_line_count=sum(len(rows) for rows in accounting.values()) if isinstance(accounting,dict) else None)
+        from .executive import accepted_executive
+        try:result.update(accepted_executive(c,doc))
+        except (ValidationError,OSError):
+            result.update(executive=None,executive_report=None,executive_error='Accepted executive report integrity could not be verified.')
         return result
     @app.get('/api/state')
     async def state():
+        from .provider import empty_usage_summary
         return {'processes':[display_process(p) for p in c.ledger.list(True)],'portfolio':portfolio(c.ledger),'token':token,
+                'provider_usage':c.provider.usage_summary() if c.provider else empty_usage_summary(),
                 'capability':'Flat COBOL IF / literal MOVE subset. Other syntax remains blocked.',
                 'connections':{'zowe_profile_configured':bool(__import__('os').environ.get('WB_ZOWE_PROFILE')),'db2_endpoint_configured':bool(__import__('os').environ.get('WB_DB2_MCP_URL')),'llm_configured':bool(c.provider),'local_source_export':(c.root/'Endeavor').is_dir()}}
+    @app.get('/api/setup')
+    async def setup():
+        from .setup import inspect_setup
+        return inspect_setup(c.root)
+    @app.post('/api/setup')
+    async def update_setup(request:Request):
+        from .setup import MAX_SETUP_BYTES, save_setup
+        b=await body(request,MAX_SETUP_BYTES)
+        require(set(b)=={'answers'},'Supply only the nonsecret setup answers object')
+        return save_setup(c.root,b['answers'])
     @app.get('/api/templates/intake')
     async def template():
         path=Path(__file__).parent.parent/'examples/intake-template.xlsx'
@@ -105,7 +128,28 @@ def create_app(root, origin='http://127.0.0.1:8765'):
         from .coverage import build_coverage
         return await asyncio.to_thread(build_coverage,c.ledger.get(pid),c.root)
     @app.get('/api/process/{pid}/artifact')
-    async def artifact(pid:str,path:str):
+    async def artifact(pid:str,path:str,request:Request,inline:bool=False):
+        if inline:
+            from .executive import accepted_executive
+            require(request.query_params.getlist('path')==[path] and len(request.query_params.getlist('inline'))==1,
+                    'Inline report parameters must be unambiguous')
+            published=accepted_executive(c,c.ledger.get(pid))
+            require(published['executive_report']==path,'Only the accepted primary executive report can be opened inline')
+            p=c.artifact(pid,path)
+            # The accepted report keeps relative links for downloaded bundles. The
+            # browser view points the fixed evidence links at verified local
+            # artifact reads, leaving the frozen report bytes unchanged.
+            allowed={'coverage.html','metrics.json','management.pptx','inspection.json','../../analysis/source-analysis.json'}
+            def evidence_link(match):
+                name=match.group(1)
+                require(name in allowed,'Unsupported inline report evidence link')
+                relative='analysis/source-analysis.json' if name.startswith('../../') else str(Path(path).parent/name).replace('\\','/')
+                url='/api/process/'+quote(pid,safe='')+'/artifact?'+urlencode({'path':relative})
+                return 'href="'+html.escape(url,quote=True)+'"'
+            content=re.sub(r'href="([^"]+)"',evidence_link,p.read_text(encoding='utf-8'))
+            return Response(content,media_type='text/html',headers={
+                'Content-Disposition':'inline; filename="executive-report.html"',
+                'Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'; script-src 'none'; connect-src 'none'; form-action 'none'; frame-ancestors 'none'; base-uri 'none'"})
         p=c.artifact(pid,path);return Response(p.read_bytes(),media_type='application/octet-stream',headers={'Content-Disposition':'attachment; filename="'+p.name+'"'})
     @app.get('/{asset:path}')
     async def frontend(asset:str):

@@ -5,6 +5,8 @@ import math
 from pathlib import Path
 import re
 import uuid
+import stat
+import unicodedata
 import zipfile
 import zlib
 from io import BytesIO
@@ -54,7 +56,21 @@ def sha(data):
 
 
 def encode(value):
-    return (json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True, allow_nan=False) + '\n').encode()
+    try:
+        # The writer must not persist values that the bounded reader cannot
+        # recover, or silently coerce object keys into different identities.
+        pending = [(value, 0)]
+        while pending:
+            item, depth = pending.pop()
+            require(depth <= MAX_DOCUMENT_DEPTH, 'JSON document nesting exceeds limit')
+            if isinstance(item, dict):
+                require(all(isinstance(key, str) for key in item), 'JSON object keys must be text')
+                pending.extend((child, depth + 1) for pair in item.items() for child in pair)
+            elif isinstance(item, (list, tuple)):
+                pending.extend((child, depth + 1) for child in item)
+        return (json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True, allow_nan=False) + '\n').encode('utf-8')
+    except (ValueError, TypeError, UnicodeError, RecursionError) as exc:
+        raise ValidationError('Invalid JSON document for persistence') from exc
 
 
 def decode(data, limit=MAX_UPLOAD):
@@ -75,7 +91,10 @@ def decode(data, limit=MAX_UPLOAD):
         require(math.isfinite(n), 'Nonfinite numbers are not accepted')
         return n
     try:
-        result = json.loads(data, object_pairs_hook=pairs, parse_float=floating, parse_constant=lambda v: require(False, 'Invalid JSON number'))
+        # json.loads(bytes) otherwise auto-detects UTF-16/32, contrary to the
+        # UTF-8 source and document contract used by the API and hashes.
+        text = data if isinstance(data, str) else bytes(data).decode('utf-8-sig')
+        result = json.loads(text, object_pairs_hook=pairs, parse_float=floating, parse_constant=lambda v: require(False, 'Invalid JSON number'))
         # Some JSON parsers accept trees deeper than the encoder or downstream
         # consumers can handle. Bound the persisted document independently of
         # the interpreter recursion setting and reject lone escaped surrogates.
@@ -108,9 +127,10 @@ def write_new(path, data):
 def atomic_json(path, value):
     path = Path(path)
     require(not path.is_symlink() and not any(p.is_symlink() for p in path.parents), 'Unsafe state path')
+    require(not path.exists() or path.is_file(), 'State destination must be a regular file')
+    payload = encode(value)
     path.parent.mkdir(parents=True, exist_ok=True)
     temp = path.parent / ('.' + path.name + '.' + uuid.uuid4().hex)
-    payload = encode(value)
     created = False
     try:
         with temp.open('xb') as out:
@@ -130,13 +150,31 @@ def checked_zip(data):
         entries = archive.infolist()
         require(len(entries) <= 300 and sum(x.file_size for x in entries) <= 32 * 1024 * 1024, 'Archive expansion exceeds limit')
         require(len({x.filename for x in entries}) == len(entries), 'Duplicate archive members are not accepted')
+        identities = {}
         for x in entries:
             require(not x.filename.startswith(('/', '\\')) and '..' not in Path(x.filename).parts and '\\' not in x.filename, 'Unsafe archive path')
+            name = x.filename[:-1] if x.is_dir() else x.filename
+            parts = name.split('/')
+            require(all(part and part not in {'.', '..'} for part in parts), 'Archive paths must have canonical member identities')
+            require(not any(ord(c) < 32 or c in ':<>"|?*' for c in name), 'Archive path uses unsupported characters')
+            require(all(not p.endswith(('.', ' ')) and p.split('.')[0].upper() not in DEVICES for p in parts), 'Archive path uses a reserved platform filename')
+            key = unicodedata.normalize('NFC', name).casefold()
+            require(key not in identities, 'Archive members have colliding portable identities')
+            identities[key] = x.is_dir()
+            kind = stat.S_IFMT(x.external_attr >> 16)
+            require(kind in {0, stat.S_IFREG, stat.S_IFDIR}, 'Archive members must be regular files or directories')
+            require(not x.is_dir() or x.file_size == 0, 'Archive directory contains unexpected data')
             require(x.file_size <= 8 * 1024 * 1024, 'Archive member exceeds limit')
+            # Read every member within the expansion budget so CRC/compression
+            # failures cannot bypass the gate by using a non-XML filename.
+            payload = archive.read(x)
             if x.filename.lower().endswith(('.xml', '.rels')):
                 # Detect declarations in UTF-16/32 as well as ordinary UTF-8.
-                body = archive.read(x).replace(b'\x00',b'').upper()
+                body = payload.replace(b'\x00',b'').upper()
                 require(b'<!DOCTYPE' not in body and b'<!ENTITY' not in body, 'XML declarations/entities are not accepted')
+        for key in identities:
+            require(all(identities.get(parent.as_posix(), True) for parent in Path(key).parents if parent.as_posix() != '.'),
+                    'Archive member is also a parent file')
         return archive
     except ValidationError:
         if archive is not None: archive.close()

@@ -144,9 +144,10 @@ def _utility_index(snapshot):
         for item in items for name in [item['name'], *item['aliases']]}
 
 
-def _without_block_comments(raw, depth):
-    """Remove comment text without interpreting comment markers inside literals."""
-    result=[]; quote=None; index=0
+def _without_block_comments(raw, depth, quote=None):
+    """Remove comments and mask literal continuation lines, retaining locations."""
+    result=[]; index=0; continued=quote is not None
+    if continued: result.append(quote)
     while index < len(raw):
         pair=raw[index:index+2]; char=raw[index]
         if depth:
@@ -154,15 +155,16 @@ def _without_block_comments(raw, depth):
             elif pair=='*/': depth-=1; index+=2; result.append(' ')
             else: index+=1
         elif quote:
-            result.append(char); index+=1
+            result.append(' ' if continued and char != quote else char); index+=1
             if char==quote:
                 if index < len(raw) and raw[index]==quote:
                     result.append(raw[index]); index+=1
-                else: quote=None
+                else: quote=None; continued=False
         elif char in "\"'": quote=char; result.append(char); index+=1
+        elif pair in {'--', '*>'}: break
         elif pair=='/*': depth=1; index+=2; result.append(' ')
         else: result.append(char); index+=1
-    return ''.join(result), depth
+    return ''.join(result), depth, quote
 
 
 def _lines(text):
@@ -171,7 +173,7 @@ def _lines(text):
     This is recognition only: symbol expansion, continued DD operands and
     product-specific data delimiters still need the native JCL adapter.
     """
-    result=[]; data=None; block_depth=0; jcl_seen=False
+    result=[]; data=None; block_depth=0; quote=None; jcl_seen=False
     for number, raw in enumerate(text.splitlines(), 1):
         if data:
             delimiter, ends_at_jcl=data
@@ -184,16 +186,16 @@ def _lines(text):
         # unnumbered debug lines need whitespace or a COBOL declaration marker.
         fixed=(re.match(r'^\d{6}[ */Dd-]',raw) or
                re.match(r'^ {6}(?:[ */-]|[Dd](?=\s|PROGRAM-ID\b|COPY\b|\d{2}\s))',raw,re.I))
-        if fixed and not block_depth:
+        if fixed and not block_depth and not quote:
             if raw[6] in '*/': continue
             raw=raw[7:72]
-        if not block_depth and raw.lstrip().startswith(('*>', '//*', '--')): continue
+        if not block_depth and not quote and raw.lstrip().startswith(('*>', '//*', '--')): continue
         # A bare /* is a JCL delimiter, not an unterminated source comment.
-        if not block_depth and raw.startswith('//'): jcl_seen=True
-        if raw.strip()=='/*' and not block_depth and jcl_seen: continue
-        if block_depth or not raw.startswith('//'):
-            rexx_header=not block_depth and re.match(r'^\s*/\*\s*REXX\b', raw, re.I)
-            raw,block_depth=_without_block_comments(raw,block_depth)
+        if not block_depth and not quote and raw.startswith('//'): jcl_seen=True
+        if raw.strip()=='/*' and not block_depth and not quote and jcl_seen: continue
+        if block_depth or quote or not raw.startswith('//'):
+            rexx_header=not block_depth and not quote and re.match(r'^\s*/\*\s*REXX\b', raw, re.I)
+            raw,block_depth,quote=_without_block_comments(raw,block_depth,quote)
             if rexx_header: result.append((number, '/* REXX */'))
         result.append((number, raw))
         inline=re.match(r'^//(?:[A-Z0-9@$#]+)?\s+DD\s+(DATA|\*)(?=\s|,|$)',raw,re.I)
@@ -302,13 +304,17 @@ def utility_findings(manifest: dict, snapshot: dict, files: dict[str, str] | Non
     for job in manifest.get('jobs',[]):
         require(isinstance(job,dict) and isinstance(job.get('steps',[]),list), 'Utility findings require job objects with step lists')
         _string(job.get('name'), 'Utility job identity')
+        require(not any(c.isspace() for c in job['name']), 'Utility job identity must be one identifier')
         for step in job.get('steps',[]):
             require(isinstance(step,dict), 'Utility findings require step objects')
-            for field in ('name','program'): _string(step.get(field), 'Utility step '+field)
+            for field in ('name','program'):
+                _string(step.get(field), 'Utility step '+field)
+                require(not any(c.isspace() for c in step[field]), 'Utility step '+field+' must be one identifier')
             finding(step.get('program','').upper(),job['name'],step['name'],'manifest')
     for path,text in sorted((files or {}).items()):
         job=''
         for number,line in _lines(text):
+            if line.strip()=='//': job=''
             match=re.match(r'^//([A-Z0-9@$#]+)\s+JOB(?:\s|$)',line,re.I)
             if match: job=match[1].upper()
             execute=JCL_EXEC.match(line)

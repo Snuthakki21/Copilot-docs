@@ -14,6 +14,7 @@ import unicodedata
 
 from .domain import MAX_SOURCE_LINES, ValidationError, require, safe_path
 from .layout import validate_workspace
+from .setup import deterministic_metrics
 
 REPOSITORY = Path(__file__).resolve().parent.parent
 STATIC_ROOT = Path(__file__).with_name('static')
@@ -120,7 +121,7 @@ def inspect_workspace(workspace, manifest=None, *, port=None, environ=None, coor
     root = Path(workspace).absolute()
     checks = []
     result = {'status':'READY', 'conversion_status':'UNVERIFIED', 'checks':checks,
-              'conversion_blockers':[], 'network_requests':0,
+              'conversion_blockers':[], 'network_requests':0, 'metrics':deterministic_metrics(),
               'scope':'Offline local setup/intake check. READY permits analysis; it is not conversion, parity, or connectivity certification.'}
 
     def add(name, status, message, action=''):

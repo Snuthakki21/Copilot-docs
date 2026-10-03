@@ -63,12 +63,12 @@ class ReviewResult(unittest.TextTestResult):
     def stopTest(self,test):
         row=self.active.pop(test.id())
         row['seconds']=round(time.monotonic()-row.pop('started'),6)
-        row['id']='R'+re.search(r'\.test_r(\d{3})_',test.id())[1]
+        row['id']='R'+re.search(r'\.test_r(\d{3,4})_',test.id())[1]
         self.rows.append(row);super().stopTest(test)
         if len(self.rows)%25==0:print(f'{len(self.rows)}/500 scenarios executed',flush=True)
 
 
-def run(output):
+def run(output,first=1,last=500,pattern='test_review500_*.py'):
     output=Path(output).absolute()
     require(output.is_relative_to(ROOT/'.implementation'),'Review logs belong under .implementation')
     safe_path(ROOT,output.relative_to(ROOT).as_posix())
@@ -81,13 +81,14 @@ def run(output):
     os.environ['TMPDIR']=str(temp)
     import tempfile
     tempfile.tempdir=None
-    suite=unittest.defaultTestLoader.discover(str(ROOT/'tests'),pattern='test_review500_*.py')
+    suite=unittest.defaultTestLoader.discover(str(ROOT/'tests'),pattern=pattern)
     cases=list(flatten(suite));ids=[]
     for case in cases:
-        match=re.search(r'\.test_r(\d{3})_',case.id())
+        match=re.search(r'\.test_r(\d{3,4})_',case.id())
         require(match is not None,'Every review needs a numbered, distinct test: '+case.id())
         ids.append(int(match[1]))
-    require(sorted(ids)==list(range(1,501)),'Reviews must contain each ID R001 through R500 exactly once')
+    require(last-first+1==500 and sorted(ids)==list(range(first,last+1)),
+            f'Reviews must contain each ID R{first:03d} through R{last:03d} exactly once')
     before=fingerprint()
     with (output/'execution.log').open('w',encoding='utf-8') as log:
         result=unittest.TextTestRunner(stream=log,verbosity=2,resultclass=ReviewResult).run(suite)
@@ -97,7 +98,7 @@ def run(output):
             'source_fingerprint':before,'source_unchanged':before==after,
             'planned':500,'executed':len(result.rows),'passed':sum(r['status']=='PASS' for r in result.rows),
             'unverified':sum(r['status']=='UNVERIFIED' for r in result.rows),
-            'rows':sorted(result.rows,key=lambda r:r['id']),
+            'rows':sorted(result.rows,key=lambda r:int(r['id'][1:])),
             'execution_log_sha256':hashlib.sha256((output/'execution.log').read_bytes()).hexdigest(),
             'limitations':['Local fictional fixtures only; live connections and native platform behavior remain separately unverified',
                            'Passing tests do not add unsupported conversion semantics or establish observed mainframe parity']}

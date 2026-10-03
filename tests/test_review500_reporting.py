@@ -318,10 +318,10 @@ class Review500ReportingTests(unittest.TestCase):
     def test_r438_report_projection_removes_revoked_completion(self):
         self.assertEqual(report_portfolio(self.ledger, self.doc, 'COMPLETED_WITH_BLOCKERS')['completed_processes'], 0)
 
-    def test_r439_report_inspection_hashes_all_eight_outputs(self):
+    def test_r439_report_inspection_hashes_all_required_outputs(self):
         folder = self.base / 'reports/report-0001'
         inspection = json.loads((folder / 'inspection.json').read_text())
-        self.assertEqual(len(inspection['sha256']), 8)
+        self.assertEqual(set(inspection['sha256']), {'executive-report.html', 'metrics.json', 'metrics.csv', 'metrics.xlsx', 'management.pptx', 'coverage.json', 'coverage.csv', 'coverage.xlsx', 'coverage.html'})
         self.assertTrue(all(sha((folder / name).read_bytes()) == h for name, h in inspection['sha256'].items()))
         self.assertFalse(inspection['powerpoint_render_checked'])
 

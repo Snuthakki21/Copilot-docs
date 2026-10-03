@@ -12,7 +12,7 @@ Read `START_HERE.md` for environment setup. Run meaningful regression tests with
 `python -m unittest discover -s tests`. Engine changes need real tests and
 adversarial review before any completion claim.
 
-Preserve [docs/WORKSPACE_LAYOUT.md](../docs/WORKSPACE_LAYOUT.md). Validate with
+Preserve [docs/TECHNICAL_REFERENCE.md](../docs/TECHNICAL_REFERENCE.md). Validate with
 `python -m workbench.layout --workspace WORKSPACE` before and after work.
 Process output stays under `processes/PROCESS_ID/{input,analysis,review,synthetic,target,reports,tests}`;
 shared target versions and canonical approved knowledge have their documented

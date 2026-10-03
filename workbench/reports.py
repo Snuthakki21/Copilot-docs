@@ -9,6 +9,7 @@ from pptx.dml.color import RGBColor
 from .domain import encode, atomic_json, sha, require
 from .ledger import now
 from .coverage import build_coverage, write_coverage
+from .executive import executive_summary, render_executive, inspect_executive, PRIMARY_REPORT
 
 def metrics(ledger, doc, coverage=None, portfolio_model=None):
     coverage=coverage or build_coverage(doc,ledger.root)
@@ -98,7 +99,7 @@ def report_portfolio(ledger,doc,final_status):
 def generate_reports(ledger,doc,root,checkpoint=None):
     root=Path(root)
     names=('metrics.json','metrics.csv','metrics.xlsx','management.pptx','inspection.json',
-           'coverage.json','coverage.csv','coverage.xlsx','coverage.html')
+           'coverage.json','coverage.csv','coverage.xlsx','coverage.html',PRIMARY_REPORT)
     require(not root.is_symlink() and not any(p.is_symlink() for p in root.parents),'Unsafe report output path')
     require(not any((root/name).exists() or (root/name).is_symlink() for name in names),
             'Report evidence already exists; create a new report version')
@@ -108,6 +109,10 @@ def generate_reports(ledger,doc,root,checkpoint=None):
     final_status='COMPLETED' if coverage['summary']['completion_eligible'] and not doc.get('blockers') and not doc.get('cancel_requested') else 'COMPLETED_WITH_BLOCKERS'
     pf=report_portfolio(ledger,doc,final_status)
     m=metrics(ledger,doc,coverage,portfolio_model=pf);model={'created':now(),'metrics':m,'portfolio':pf,'blockers':doc['blockers'],'lineage':(doc.get('analysis') or {}).get('graph',[])}
+    model['executive_context']={key:doc.get(key) for key in ('id','name','status','demo','fixture_only','cancel_requested','packet_imported','verification_finished','manifest_hash','blockers')}
+    model['executive_context']['analysis']={'source_snapshot':(doc.get('analysis') or {}).get('source_snapshot')}
+    model['executive_context']['artifacts']=[name for name in doc.get('artifacts',[]) if name=='analysis/source-analysis.json']
+    model['executive']=executive_summary(model['executive_context'],m,coverage)
     atomic_json(root/'metrics.json',model)
     csvout=StringIO();writer=csv.writer(csvout);writer.writerow(['Metric','Value'])
     for k,v in m.items():writer.writerow([k,'Unknown' if v is None else v])
@@ -161,6 +166,9 @@ def generate_reports(ledger,doc,root,checkpoint=None):
     for s in inspected.slides:
         for shape in s.shapes:require(shape.left>=0 and shape.top>=0 and shape.left+shape.width<=inspected.slide_width and shape.top+shape.height<=inspected.slide_height,'Deck geometry exceeds canvas')
     require(str(m['source_programs']) in '\n'.join(c.text for s in inspected.slides for sh in s.shapes if sh.has_table for row in sh.table.rows for c in row.cells),'Deck metric missing')
-    paths=[root/f for f in ['metrics.json','metrics.csv','metrics.xlsx','management.pptx']]+coverage_paths
-    atomic_json(root/'inspection.json',{'verified':True,'checks':['6 editable slides','full source accountability in JSON/CSV/XLSX/HTML','all shapes within canvas','source program metric present'],'powerpoint_render_checked':False,'sha256':{p.name:sha(p.read_bytes()) for p in paths}})
+    executive_html=render_executive(model['executive'])
+    (root/PRIMARY_REPORT).write_text(executive_html,encoding='utf-8')
+    inspect_executive((root/PRIMARY_REPORT).read_text(encoding='utf-8'),model['executive'])
+    paths=[root/PRIMARY_REPORT]+[root/f for f in ['metrics.json','metrics.csv','metrics.xlsx','management.pptx']]+coverage_paths
+    atomic_json(root/'inspection.json',{'verified':True,'primary_report':PRIMARY_REPORT,'executive_schema_version':1,'executive_html_checked':True,'checks':['Executive metrics, safe links and collapsed disclosure','6 editable slides','full source accountability in JSON/CSV/XLSX/HTML','all shapes within canvas','source program metric present'],'powerpoint_render_checked':False,'sha256':{p.name:sha(p.read_bytes()) for p in paths}})
     return paths+[root/'inspection.json']

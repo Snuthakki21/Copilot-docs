@@ -18,6 +18,6 @@ export function SetupDiagnostics({connections}:{connections:Record<string,boolea
  <h3>Connection configuration</h3><p>Configuration is read from your local environment at startup. “Configured” does not prove that credentials or connectivity work. These checks do not execute anything on the mainframe.</p>
  {Object.entries(connections).map(([key,value])=><p key={key}><span className="dot"/>{key.replaceAll('_',' ')}: {value?'Configured':'Not configured'}</p>)}
  <p>Zowe: <code>WB_ZOWE_PROFILE</code>. Db2: <code>WB_DB2_MCP_URL</code> and <code>WB_DB2_MCP_TOKEN</code>. Optional LLM: <code>WB_LLM_URL</code>, <code>WB_LLM_MODEL</code>, <code>WB_LLM_TOKEN</code> and explicit <code>WB_ALLOW_SOURCE_EGRESS=true</code>.</p>
- <p>See <code>START_HERE.md</code> for setup and <code>docs/OPERATIONS.md</code> for recovery and the inputs each process needs. The Knowledge tab shows the application utility file you can edit before intake.</p>
+ <p>See <code>START_HERE.md</code> for setup and <code>docs/TECHNICAL_REFERENCE.md</code> for recovery and the inputs each process needs. The Knowledge tab shows the application utility file you can edit before intake.</p>
  </section>;
 }

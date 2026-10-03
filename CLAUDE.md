@@ -9,7 +9,7 @@ references that same prompt.
 
 Use `python -m workbench.runner`, backed by the existing Coordinator, and validate
 placement with `python -m workbench.layout --workspace WORKSPACE`. The folder
-contract is [docs/WORKSPACE_LAYOUT.md](docs/WORKSPACE_LAYOUT.md). Source exports
+contract is [docs/TECHNICAL_REFERENCE.md](docs/TECHNICAL_REFERENCE.md). Source exports
 are immutable, mainframe operations are read-only, the one SME review is human,
 and completion requires real verification, source coverage accountability and
 adversarial review. Never manufacture approval or an unsupported success claim.

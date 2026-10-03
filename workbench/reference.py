@@ -45,5 +45,7 @@ def run_reference(program, record):
     for rule in program['rules']:
         branch=predicate(rule['predicate'],state)
         for effect in rule['then'] if branch else rule['else']:state[effect['field']]=effect['value']
-        trace.append({'rule_id':rule['id'],'branch':branch,'source_refs':rule['source_refs']})
+        # Returned evidence must not expose the source IR's mutable provenance
+        # list. Each call and fixture case owns its own trace, like the target.
+        trace.append({'rule_id':rule['id'],'branch':branch,'source_refs':list(rule['source_refs'])})
     return {'input_status':'ACCEPT_INPUT','record':state,'trace':trace,'return_code':0}

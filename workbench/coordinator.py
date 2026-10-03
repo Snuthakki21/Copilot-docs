@@ -56,7 +56,7 @@ class Coordinator:
                         require(safe_path(self.process_root(p['id']),'review/'+file).is_file(),'Issued packet is incomplete; recover its preserved snapshot')
                         self.register(p,'review/'+file)
                 if p['status'] in ('ANALYZING','VERIFYING','REPORTING'):
-                    status='QUEUED_REPORT' if p.get('cancel_requested') or p.get('verification_finished') else 'QUEUED_ANALYSIS' if not p['packet_issued'] else 'QUEUED_VERIFY' if p['packet_imported'] else 'WAITING_SME'
+                    status='QUEUED_REPORT' if p['status']=='REPORTING' or p.get('cancel_requested') or p.get('verification_finished') else 'QUEUED_ANALYSIS' if not p['packet_issued'] else 'QUEUED_VERIFY' if p['packet_imported'] else 'WAITING_SME'
                     self.ledger.save(p,status)
                 elif len(p['artifacts'])!=prior_artifacts:self.ledger.save(p)
         except Exception:
@@ -131,8 +131,7 @@ class Coordinator:
             require_layout(self.root)
             doc=self.ledger.get(pid);self.manifest_integrity(doc);require(doc['status']=='READY','Process already started; use Resume when applicable')
             doc['authorization']={'recorded':now(),'scope':doc['source_files'],'target':'trusted-generated-subset/python-sqlite','seed':21,'max_cases_per_program':256,'max_repair_attempts':1,'source_operations':'read-only','mainframe_execution':False}
-            self.ledger.event(pid,'start','Start authorization recorded; source writes and mainframe execution are prohibited')
-            return self.ledger.save(doc,'QUEUED_ANALYSIS')
+            return self.ledger.save_event(doc,'QUEUED_ANALYSIS','start','Start authorization recorded; source writes and mainframe execution are prohibited')
 
     def control(self,pid,action):
         with self.lock:
@@ -153,8 +152,7 @@ class Coordinator:
                 doc['cancel_requested']=True;status='QUEUED_REPORT'
             else:raise ValidationError('Unknown control')
             doc['control_revision']=doc.get('control_revision',0)+1
-            self.ledger.event(pid,action,'Operator '+action+' recorded; existing SME quota retained')
-            return self.ledger.save(doc,status)
+            return self.ledger.save_event(doc,status,action,'Operator '+action+' recorded; existing SME quota retained')
 
     def checkpoint(self,doc,status=None,persist=True):
         """Accept durable controls under a short lock; workers never overwrite them."""
@@ -210,7 +208,7 @@ class Coordinator:
             returned=self.process_root(pid)/'input'/'sme-return.xlsx'
             if returned.exists():require(returned.read_bytes()==data,'Recovery return differs from the preserved SME file')
             else:write_new(returned,data)
-            self.ledger.consume_return(pid,answers);self.ledger.event(pid,'review','One SME return imported; automatic continuation queued')
+            self.ledger.consume_return(pid,answers)
             return self.ledger.get(pid)
 
     def manifest_integrity(self,doc):
@@ -234,7 +232,7 @@ class Coordinator:
         require(packet.get('packet_hash')==doc['packet_hash'] and sha(encode({k:v for k,v in packet.items() if k!='packet_hash'}))==doc['packet_hash'],'Frozen SME packet integrity failed')
         require(packet['source_snapshot']==doc['analysis']['source_snapshot'],'SME packet differs from the frozen source snapshot')
         if doc['packet_imported']:
-            answers=doc.get('answers') or {};raw=(self.process_root(doc['id'])/'input'/'sme-return.xlsx').read_bytes()
+            answers=doc.get('answers') or {};raw=safe_path(self.process_root(doc['id']),'input/sme-return.xlsx').read_bytes()
             require(sha(raw)==answers.get('return_hash'),'Preserved SME return changed')
             require(read_answers(raw,packet,answers.get('reviewer',''))==answers,'SME answers differ from the preserved return')
 
@@ -432,7 +430,7 @@ class Coordinator:
                 for partial in output.rglob('*'):
                     if partial.is_file() and not partial.is_symlink():self.register(doc,str(partial.relative_to(root)))
         self.checkpoint(doc)
-        required={'metrics.json','metrics.csv','metrics.xlsx','management.pptx','inspection.json','coverage.json','coverage.csv','coverage.xlsx','coverage.html'}
+        required={'metrics.json','metrics.csv','metrics.xlsx','management.pptx','inspection.json','coverage.json','coverage.csv','coverage.xlsx','coverage.html','executive-report.html'}
         require(required.issubset({Path(p).name for p in paths}),'Mandatory report or source coverage outputs missing')
         hashes={}
         for path in paths:
@@ -440,6 +438,10 @@ class Coordinator:
             require(path.is_file() and path.stat().st_size>0,'Generated report artifact missing or empty')
             self.register(doc,relative);hashes[relative]=sha(path.read_bytes())
         inspection=decode((output/'inspection.json').read_bytes());require(inspection.get('verified') is True,'Report inspection did not pass')
+        require(inspection.get('primary_report')=='executive-report.html'
+                and inspection.get('executive_schema_version')==1
+                and inspection.get('executive_html_checked') is True,
+                'Executive report inspection did not pass')
         require((required-{'inspection.json'}).issubset(inspection.get('sha256',{})),'Report inspection omitted mandatory artifact hashes')
         for name,fingerprint in inspection.get('sha256',{}).items():require(sha((output/name).read_bytes())==fingerprint,'Report inspection hash differs')
         with self.lock:

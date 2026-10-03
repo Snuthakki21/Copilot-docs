@@ -54,12 +54,38 @@ def from_rows(pid, name, rows):
 
 def parse_manifest(text):
     require(isinstance(text, str) and len(text) <= 128000, 'Markdown intake is too large')
+    # Rendered examples and comments are not operator-supplied process facts.
+    visible=[]; fence=None; comment=False
+    for line in text.splitlines(keepends=True):
+        if fence:
+            if re.fullmatch(r'[ \t]{0,3}' + re.escape(fence[0]) + '{' + str(fence[1]) + r',}[ \t]*\r?\n?', line): fence=None
+            visible.append('\n'); continue
+        remainder=line; active=''
+        while remainder:
+            if comment:
+                end=remainder.find('-->')
+                if end < 0: remainder=''; break
+                comment=False; remainder=remainder[end+3:]
+            else:
+                start=remainder.find('<!--')
+                if start < 0: active+=remainder; break
+                active+=remainder[:start]; remainder=remainder[start+4:]; comment=True
+        marker=re.match(r'^[ \t]{0,3}(`{3,}|~{3,})', active)
+        if marker: fence=(marker[1][0],len(marker[1])); visible.append('\n')
+        else: visible.append(active if active.endswith('\n') else active+'\n')
+    require(fence is None and not comment, 'Close Markdown example fences and comments before intake')
+    text=''.join(visible)
     def attr(label):
         # Horizontal whitespace only: an empty attribute must never absorb
         # the next line (for example the job-table header) as its value.
-        matches = re.findall(r'^[ \t]*[-*]?[ \t]*' + label + r'[ \t]*:[ \t]*`?([^`\r\n]+)`?[ \t]*\r?$', text, re.M | re.I)
+        matches = re.findall(r'^[ \t]*[-*]?[ \t]*' + label + r'[ \t]*:[ \t]*([^\r\n]+)[ \t]*\r?$', text, re.M | re.I)
         require(len(matches)==1, f'Supply exactly one {label}')
-        return matches[0].strip()
+        value=matches[0].strip()
+        if '`' in value:
+            require(value.startswith('`') and value.endswith('`') and value.count('`')==2,
+                    'Use balanced inline-code wrappers for '+label)
+            value=value[1:-1].strip()
+        return value
     rows = [];header=False
     for line in text.splitlines():
         if not line.strip().startswith('|'): continue
@@ -101,12 +127,23 @@ def _parse_intake_xlsx(data):
         with checked_zip(data) as archive:
             xml=fromstring(archive.read(sheet._worksheet_path))
         namespace='{http://schemas.openxmlformats.org/spreadsheetml/2006/main}'
+        dimension_nodes=xml.findall(namespace+'dimension')
+        require(len(dimension_nodes)==1, 'Intake worksheet needs one dimension declaration')
+        dimension_ref=dimension_nodes[0].get('ref','')
+        require(re.fullmatch(r'A1:[A-H][1-9][0-9]{0,2}',dimension_ref) is not None,
+                'Intake worksheet dimensions must include the metadata origin A1')
+        require(len(xml.findall(namespace+'sheetData'))==1, 'Intake worksheet needs one sheetData section')
+        require(not xml.findall(namespace+'mergeCells/'+namespace+'mergeCell'), 'Merged intake cells are ambiguous')
         seen=set();row_ids=set()
         for row in xml.findall(namespace+'sheetData/'+namespace+'row'):
             position=row.get('r','')
             require(position.isdigit() and 1<=int(position)<=205 and position not in row_ids,'Actual intake row exceeds dimensions/bounds or is duplicated')
             row_ids.add(position)
             for cell in row.findall(namespace+'c'):
+                require(all(len(cell.findall(namespace+tag))<=1 for tag in ('v','is','f')),
+                        'Intake cells must not contain duplicate value elements')
+                require(not (cell.find(namespace+'v') is not None and cell.find(namespace+'is') is not None),
+                        'Intake cell has conflicting value representations')
                 ref=cell.get('r','');match=re.fullmatch(r'([A-H])([1-9][0-9]{0,2})',ref)
                 require(match is not None and int(match[2])<=205 and match[2]==position and ref not in seen,'Actual intake cell exceeds dimensions/bounds or is duplicated')
                 seen.add(ref)
@@ -118,6 +155,11 @@ def _parse_intake_xlsx(data):
         require((ws.max_row,ws.max_column)==dimensions,'Declared and actual intake worksheet dimensions disagree')
         for row in ws:
             require(all(c.data_type != 'f' for c in row), 'Formulas are not accepted in intake')
+            require(all(c.data_type != 'e' for c in row), 'Excel error cells are not accepted in intake')
+        require(ws['A1'].value=='Process ID' and ws['A2'].value=='Process name', 'Intake metadata labels changed')
+        require(all(ws.cell(r,c).value is None or isinstance(ws.cell(r,c).value,str) and not ws.cell(r,c).value.strip()
+                    for r in range(1,4) for c in range(1,9) if r==3 or c>2),
+                'Unexpected populated cells outside the intake metadata and job table')
         require([ws.cell(4,c).value for c in range(1,9)] == HEADERS, 'Intake headers changed')
         rows = []
         for r in range(5,ws.max_row+1):

@@ -10,6 +10,7 @@ from .coordinator import Coordinator
 from .domain import ValidationError, require, sha, write_new
 from .intake import parse_manifest
 from .layout import require_layout, output_path
+from .executive import accepted_executive, PRIMARY_REPORT
 
 TERMINAL = frozenset({'COMPLETED', 'COMPLETED_WITH_BLOCKERS', 'CANCELLED'})
 STOPPED = frozenset({'PAUSED', 'FAILED', 'REPORTING_FAILED'})
@@ -98,6 +99,12 @@ def bundle_process(coordinator, pid):
         require(all(name in doc['artifacts'] and name.startswith('reports/') for name in report_hashes)
                 and len({str(Path(name).parent) for name in report_hashes}) == 1,
                 'Bundle report hashes contain missing, orphaned or inconsistent inspected artifacts')
+        report_folder=Path(next(iter(report_hashes))).parent
+        inspection_name=(report_folder/'inspection.json').as_posix()
+        inspection=json.loads(coordinator.artifact(pid,inspection_name).read_text(encoding='utf-8'))
+        if inspection.get('primary_report') == PRIMARY_REPORT:
+            require((report_folder/PRIMARY_REPORT).as_posix() in report_hashes,
+                    'Bundle requires the accepted executive report hash baseline')
         coordinator.review_integrity(doc)
         names = sorted(set(['input/process-input.md'] +
                            ['input/sources/' + name for name in doc['source_files']] +
@@ -147,6 +154,12 @@ def summary(coordinator, doc, timed_out=False):
                    'sme_return_inbox': str(root / INBOX),
                    'continuation': shlex.join(['python', '-m', 'workbench.runner', 'resume', pid,
                                               '--workspace', str(coordinator.root), '--reviewer', 'ACTUAL REVIEWER'])})
+    accepted=accepted_executive(coordinator,doc)
+    primary=accepted['executive_report']
+    result['primary_report']=str(root/primary) if primary else None
+    result['executive']=accepted['executive']
+    result['supporting_reports']=[path for path in result['reports'] if path!=result['primary_report']] if primary else []
+    if primary:result['reports']=[result['primary_report']]
     if doc['status'] == 'WAITING_SME':
         result['message'] = 'Deliver the issued checklist for the one SME review. Preserve Context/questions. Place the actual returned workbook in sme_return_inbox and resume with reviewer attribution. Never generate SME answers.'
     elif timed_out: result['message'] = 'Bounded wait expired; evidence is preserved. Inspect status and run resume to continue.'
