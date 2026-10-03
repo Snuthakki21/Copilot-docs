@@ -92,6 +92,15 @@ class Ledger:
         with self.lock, self.db:
             doc = self.get(pid)
             require(doc['packet_issued'] and not doc['packet_imported'], 'SME return already consumed or packet not issued')
+            require(isinstance(answers,dict) and answers.get('packet_hash')==doc['packet_hash'],
+                    'SME return does not match the issued packet')
+            require(answers.get('source_snapshot')==(doc.get('analysis') or {}).get('source_snapshot')
+                    and bool(answers.get('source_snapshot')),'SME return does not match the frozen source snapshot')
+            require(isinstance(answers.get('reviewer'),str) and 0<len(answers['reviewer'].strip())<=160,
+                    'SME return requires reviewer attribution')
+            require(isinstance(answers.get('return_hash'),str) and len(answers['return_hash'])==64,
+                    'SME return requires its preserved file fingerprint')
+            require(isinstance(answers.get('items'),dict),'SME return requires an answer mapping')
             doc['answers'] = answers
             canonical = {k:v for k,v in doc.items() if k not in {'status','packet_issued','packet_imported','packet_hash','created','updated'}}
             cur = self.db.execute('UPDATE processes SET packet_imported=1,document=?,status=?,updated=? WHERE id=? AND packet_imported=0', (encode(canonical).decode(),'QUEUED_VERIFY',now(),pid))
@@ -100,6 +109,13 @@ class Ledger:
     def register_assets(self, pid, assets):
         with self.lock, self.db:
             for asset in assets:
+                existing=self.db.execute('SELECT document FROM assets WHERE id=?',(asset['id'],)).fetchone()
+                # Membership-local paths and parser metadata may differ while the
+                # same immutable source version is reused by another process.
+                prior=json.loads(existing[0]) if existing is not None else None
+                require(prior is None or all(prior.get(key)==asset.get(key)
+                        for key in ('kind','name','source_hash','source_text')),
+                        'Asset identity conflicts with preserved source evidence: '+asset['id'])
                 self.db.execute('INSERT OR IGNORE INTO assets VALUES(?,?,?,?,?)',(asset['id'],asset['kind'],asset['name'],asset['source_hash'],encode(asset).decode()))
                 self.db.execute('INSERT OR IGNORE INTO process_assets VALUES(?,?)',(pid,asset['id']))
 
@@ -122,7 +138,13 @@ class Ledger:
         metric_text=encode(metrics).decode()
         status='COMPLETED_WITH_BLOCKERS' if doc['blockers'] else 'COMPLETED'
         with self.lock, self.db:
-            require(self.db.execute('SELECT 1 FROM processes WHERE id=?',(pid,)).fetchone(),'Process not found')
+            current=self.get(pid)
+            require(current['status']=='REPORTING','Report completion requires the active reporting stage')
+            require(doc.get('report_verified') is True and bool(doc.get('report_hashes')),
+                    'Report completion requires inspected report evidence')
+            require(all(doc.get('artifact_hashes',{}).get(path)==fingerprint
+                        for path,fingerprint in doc['report_hashes'].items()),
+                    'Report completion requires pinned inspection fingerprints')
             if not self.db.execute('SELECT 1 FROM snapshots WHERE process_id=? AND document=?',(pid,metric_text)).fetchone():
                 self.db.execute('INSERT INTO snapshots(process_id,document,created) VALUES(?,?,?)',(pid,metric_text,now()))
             self.db.execute('UPDATE processes SET document=?,status=?,updated=? WHERE id=?',(encode(canonical).decode(),status,now(),pid))

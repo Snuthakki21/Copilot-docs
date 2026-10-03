@@ -1,5 +1,15 @@
 # Validation evidence
 
+## 500-scenario review revision — 3 October 2026
+
+- **500 distinct numbered executable scenarios passed**, with no skips and an unchanged source fingerprint in the combined run. Six subsystem reviewers handled 80 cases each; the integration review handled 20.
+- **146 scenarios reproduced failures before their associated fixes**. Several share a root cause; this is not a count of 146 unique defects. The remaining 354 scenarios verified existing safeguards or supported behavior.
+- Fresh complete regression: **748 tests passed in 68.775 seconds**, including the production Uvicorn HTTP workflow, genuine SME-return gates, automatic report/PPT generation, historical target-v1 evidence, all 500 scenarios and prior regressions.
+- Frontend TypeScript and bundle rebuild passed after the input-map fix. Workspace layout and diff checks passed. Node executes the new frontend intake helpers; browser event interaction remains unverified.
+- [docs/REVIEW_500.md](docs/REVIEW_500.md) lists every ID and summarizes corrections; [docs/review500.json](docs/review500.json) binds each scenario to its trigger, expectation, exact test, outcome, action and limitation, plus code/log fingerprints.
+- The long-predicate/JSON-depth integration regression was reproduced and corrected. Supported 192-comparison programs survive standalone and wrapped evidence roundtrips; excessive nesting remains bounded at 256 levels. Level-77/FILLER semantics are explicitly blocked pending adapters.
+- Existing native/live/observed-parity limitations below remain. An expected-rejection test proves a safeguard, not support for the rejected feature. No operational SME answers, source writes, legacy executions or synthetic mainframe uploads occurred.
+
 ## Thirty-area review revision — 3 October 2026
 
 - **30 distinct adversarial review areas, two complete sweeps (60 pass executions)**: initial 29/30 areas passed; final **30/30 passed**, with **246 focused test executions** and an unchanged code fingerprint. Checks overlap and are not 30 full-suite runs.

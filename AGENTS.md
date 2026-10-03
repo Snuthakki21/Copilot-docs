@@ -52,3 +52,11 @@ review is `PYTHONPATH=. python tools/review_iterations.py`; its private logs sta
 under `.implementation/tmp/`. Read `docs/THIRTY_PASS_REVIEW.md` for its evidence
 and limits. This engineering review is separate from each process's existing
 conversion and adversarial gates; do not manufacture SME answers to run it.
+
+The expanded review is `PYTHONPATH=. python tools/review500.py`. It requires the
+locked Python environment and installed frontend development dependencies for
+the Node-executed intake checks. Every ID R001–R500 must execute exactly once;
+skips, failures or changing code cannot receive a passing receipt. Keep the
+scenario list in `docs/review500.json` and the explanation in
+`docs/REVIEW_500.md` aligned with any changed behavior. Preserve current tests
+and add regressions for new defects; do not rename duplicates to inflate counts.

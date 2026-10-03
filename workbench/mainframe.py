@@ -4,6 +4,8 @@ Catalog text is context, never executable instructions or proof of conversion. A
 process freezes this snapshot so later catalog edits cannot change old evidence.
 """
 from pathlib import Path
+from copy import deepcopy
+from datetime import date
 import re
 from .domain import ValidationError, decode, encode, require, safe_path, sha
 
@@ -55,6 +57,10 @@ def _validate_catalog(catalog):
     _keys(catalog, {'schema_version', 'reviewed_on', 'categories', 'utilities', 'topics'}, 'Standard catalog')
     require(type(catalog['schema_version']) is int and catalog['schema_version'] == 1, 'Unsupported standard catalog schema')
     require(isinstance(catalog['reviewed_on'], str) and re.fullmatch(r'\d{4}-\d{2}-\d{2}', catalog['reviewed_on']), 'Invalid catalog review date')
+    try:
+        date.fromisoformat(catalog['reviewed_on'])
+    except ValueError as exc:
+        raise ValidationError('Invalid catalog review date') from exc
     require(isinstance(catalog['categories'], list) and len(catalog['categories']) <= 40, 'Invalid classification categories')
     kinds=[]
     for entry in catalog['categories']:
@@ -98,6 +104,7 @@ def _check_aliases(catalog, application):
 def load_knowledge(workspace: Path):
     """Load standard knowledge plus optional local application overlay, without writes."""
     require(not CATALOG_PATH.is_symlink(), 'Standard catalog must not be a symlink')
+    require(CATALOG_PATH.is_file(), 'Standard catalog must be an existing JSON file')
     require(CATALOG_PATH.stat().st_size <= CATALOG_LIMIT, 'Standard catalog exceeds size limit')
     standard_bytes=CATALOG_PATH.read_bytes(); catalog=decode(standard_bytes, CATALOG_LIMIT)
     path=safe_path(Path(workspace), 'knowledge/application-knowledge.json')
@@ -124,6 +131,9 @@ def validate_snapshot(snapshot):
     require(isinstance(snapshot['source_hashes']['standard'], str) and HEX.fullmatch(snapshot['source_hashes']['standard']), 'Invalid standard catalog hash')
     application_hash=snapshot['source_hashes']['application']
     require(application_hash is None or (isinstance(application_hash, str) and HEX.fullmatch(application_hash)), 'Invalid application catalog hash')
+    if application_hash is None:
+        require(snapshot['application'] == {'schema_version':1, 'application':'', 'utilities':[], 'notes':[]},
+                'Application knowledge content requires a source hash')
     require(isinstance(snapshot['content_hash'], str) and HEX.fullmatch(snapshot['content_hash']), 'Invalid knowledge content hash')
     require(snapshot['content_hash'] == sha(encode({k:v for k,v in snapshot.items() if k != 'content_hash'})), 'Knowledge snapshot content changed')
 
@@ -134,25 +144,79 @@ def _utility_index(snapshot):
         for item in items for name in [item['name'], *item['aliases']]}
 
 
+def _without_block_comments(raw, depth):
+    """Remove comment text without interpreting comment markers inside literals."""
+    result=[]; quote=None; index=0
+    while index < len(raw):
+        pair=raw[index:index+2]; char=raw[index]
+        if depth:
+            if pair=='/*': depth+=1; index+=2
+            elif pair=='*/': depth-=1; index+=2; result.append(' ')
+            else: index+=1
+        elif quote:
+            result.append(char); index+=1
+            if char==quote:
+                if index < len(raw) and raw[index]==quote:
+                    result.append(raw[index]); index+=1
+                else: quote=None
+        elif char in "\"'": quote=char; result.append(char); index+=1
+        elif pair=='/*': depth=1; index+=2; result.append(' ')
+        else: result.append(char); index+=1
+    return ''.join(result), depth
+
+
 def _lines(text):
-    """Preserve original line numbers while removing only recognized comment forms."""
-    result=[]
+    """Preserve locations, excluding comments and literal in-stream input payloads.
+
+    This is recognition only: symbol expansion, continued DD operands and
+    product-specific data delimiters still need the native JCL adapter.
+    """
+    result=[]; data=None; block_depth=0; jcl_seen=False
     for number, raw in enumerate(text.splitlines(), 1):
-        if re.match(r'^\d{6}[ */D-]', raw):
+        if data:
+            delimiter, ends_at_jcl=data
+            if raw.startswith(delimiter):
+                data=None; continue
+            if ends_at_jcl and raw.startswith('//'): data=None
+            else: continue
+        # Blank sequence fields must not mistake an indented SQL DELETE for
+        # a COBOL debug indicator. Numeric sequence fields are unambiguous;
+        # unnumbered debug lines need whitespace or a COBOL declaration marker.
+        fixed=(re.match(r'^\d{6}[ */Dd-]',raw) or
+               re.match(r'^ {6}(?:[ */-]|[Dd](?=\s|PROGRAM-ID\b|COPY\b|\d{2}\s))',raw,re.I))
+        if fixed and not block_depth:
             if raw[6] in '*/': continue
             raw=raw[7:72]
-        if raw.lstrip().startswith(('*>', '//*', '--')): continue
+        if not block_depth and raw.lstrip().startswith(('*>', '//*', '--')): continue
+        # A bare /* is a JCL delimiter, not an unterminated source comment.
+        if not block_depth and raw.startswith('//'): jcl_seen=True
+        if raw.strip()=='/*' and not block_depth and jcl_seen: continue
+        if block_depth or not raw.startswith('//'):
+            rexx_header=not block_depth and re.match(r'^\s*/\*\s*REXX\b', raw, re.I)
+            raw,block_depth=_without_block_comments(raw,block_depth)
+            if rexx_header: result.append((number, '/* REXX */'))
         result.append((number, raw))
+        inline=re.match(r'^//(?:[A-Z0-9@$#]+)?\s+DD\s+(DATA|\*)(?=\s|,|$)',raw,re.I)
+        if inline:
+            delimiter=re.search(r"(?:^|,)\s*DLM\s*=\s*(?:'([^']{1,8})'|([^,\s]{1,8}))(?=\s|,|$)",raw[inline.end():],re.I)
+            value=(delimiter[1] or delimiter[2]) if delimiter else '/*'
+            data=(value, inline[1]=='*' and delimiter is None)
     return result
+
+
+def _validate_exports(files):
+    require(isinstance(files,dict) and all(isinstance(path,str) and isinstance(text,str)
+            for path,text in files.items()), 'Classification requires text exports with path identities')
 
 
 def classify_files(files: dict[str, str], manifest: dict, snapshot: dict):
     """Classify using structural evidence; suffixes are hints, never proof."""
-    validate_snapshot(snapshot); utilities=_utility_index(snapshot)
+    validate_snapshot(snapshot); _validate_exports(files); utilities=_utility_index(snapshot)
     copy_refs=set()
     for text in files.values():
         for _, line in _lines(text):
-            copy_refs.update(x.upper() for x in re.findall(r'^\s*COPY\s+[\'\"]?([A-Z][A-Z0-9_-]*)', line, re.I))
+            copy_match=re.match(r'''^\s*COPY\s+(?:(["'])([A-Z@$#][A-Z0-9@$#_-]*)\1|([A-Z@$#][A-Z0-9@$#_-]*))(?=\s|\.|$)''',line,re.I)
+            if copy_match: copy_refs.add((copy_match[2] or copy_match[3]).upper())
     suffixes={'.cbl':'cobol_program','.cob':'cobol_program','.cobol':'cobol_program', '.cpy':'copybook','.copy':'copybook',
               '.jcl':'jcl_job','.proc':'jcl_proc','.bms':'bms_map','.sql':'sql','.ddl':'sql','.dclgen':'dclgen',
               '.rexx':'rexx','.rex':'rexx','.clist':'clist','.pli':'pli','.pl1':'pli','.asm':'assembler',
@@ -171,9 +235,9 @@ def classify_files(files: dict[str, str], manifest: dict, snapshot: dict):
             if re.match(r'^(?:[A-Z0-9@$#]+\s+)?DFHM(?:SD|DI|DF)\b', stripped, re.I): add('bms_map',number,'CICS BMS macro')
             if re.match(r'^\d{2}\s+[A-Z][A-Z0-9_-]*(?:\s|\.)', stripped, re.I): add('copybook',number,'COBOL data-level declaration')
             if re.match(r'^(?:EXEC\s+SQL\s+)?DECLARE\s+[A-Z][A-Z0-9_.]*\s+TABLE\b', stripped, re.I): add('dclgen',number,'SQL DECLARE TABLE descriptor')
-            if re.match(r'^(?:CREATE|ALTER|DROP)\s+(?:TABLE|INDEX|VIEW|SCHEMA|DATABASE|TABLESPACE)\b|^(?:SELECT\s|INSERT\s+INTO\s|UPDATE\s+\S+\s+SET\s|DELETE\s+FROM\s)', stripped, re.I): add('sql',number,'SQL statement')
+            if re.match(r'^(?:CREATE|ALTER|DROP)\s+(?:TABLE|INDEX|VIEW|SCHEMA|DATABASE|TABLESPACE)\b|^(?:SELECT(?!\s+FROM\s*\()\s+|INSERT\s+INTO\s|UPDATE\s+\S+\s+SET\s|DELETE\s+FROM\s)', stripped, re.I): add('sql',number,'SQL statement')
             if re.match(r'^(?:SORT\s+FIELDS|MERGE\s+FIELDS|JOINKEYS\s|JOIN\s+UNPAIRED|REFORMAT\s+FIELDS|INCLUDE\s+COND|OMIT\s+COND|SUM\s+FIELDS|INREC\s|OUTREC\s|OUTFIL\s|OPTION\s+COPY|(?:COPY|COUNT|DISPLAY|OCCUR|SELECT|STATS|UNIQUE|VERIFY)\s+FROM\s*\(|REPRO\s+(?:IN|OUT)|DEFINE\s+(?:CLUSTER|GDG|AIX)|DELETE\s+[A-Z0-9@$#_-]+\.[A-Z0-9@$#_.-]+|SET\s+(?:MAXCC|LASTCC)\s*=|PRINT\s+INFILE\s*\(|LISTCAT(?:\s|$))', stripped, re.I): add('utility_control',number,'Recognized sort/access-method control statement; dialect still needs resolution')
-            if number <= 5 and re.search(r'/\*\s*REXX\b', line,re.I): add('rexx',number,'REXX identifying comment')
+            if number <= 5 and re.match(r'^\s*/\*\s*REXX\b', line,re.I): add('rexx',number,'REXX identifying comment')
             if re.match(r'^PROC\s+\d+\b', stripped,re.I): add('clist',number,'CLIST positional-parameter declaration')
             if re.match(r'^(?:[A-Z][A-Z0-9_]*\s*:\s*)?(?:PROC|PROCEDURE)\b.*;\s*$', stripped,re.I): add('pli',number,'PL/I procedure declaration')
             if re.match(r'^(?:[A-Z0-9@$#]+\s+)(?:CSECT|DSECT|START)\b', stripped,re.I): add('assembler',number,'Assembler section declaration')
@@ -211,12 +275,17 @@ def classify_files(files: dict[str, str], manifest: dict, snapshot: dict):
 
 def utility_findings(manifest: dict, snapshot: dict, files: dict[str, str] | None = None):
     """Recognize utilities in manifest and actual JCL cards without conversion credit."""
-    validate_snapshot(snapshot); index=_utility_index(snapshot); findings=[]; seen={}
+    validate_snapshot(snapshot); _validate_exports(files if files is not None else {})
+    require(isinstance(manifest,dict) and isinstance(manifest.get('jobs',[]),list), 'Utility findings require a job list')
+    index=_utility_index(snapshot); findings=[]; unmatched_manifest={}
     def finding(name, job, step, origin, source_ref=None):
         if name not in index: return
         key=(job.upper(), step.upper(), name)
-        if key in seen:
-            if source_ref: seen[key]['source_refs'].append(source_ref)
+        # Match each manifest declaration to at most one physical occurrence.
+        # Repeated unnamed steps, duplicate exports and procedure members retain
+        # separate evidence rows, even when their human-readable names coincide.
+        if source_ref and unmatched_manifest.get(key):
+            unmatched_manifest[key].pop(0)['source_refs'].append(source_ref)
             return
         item,source=index[name]
         row={'job':job,'step':step,'program':name,'utility_id':item['id'],
@@ -227,9 +296,15 @@ def utility_findings(manifest: dict, snapshot: dict, files: dict[str, str] | Non
         if source=='application':
             row['application_details']={key:item[key] for key in ('owner','version','record_formats','return_codes','side_effects','dependencies')}
             row['application_details']['evidence_status']='unverified_application_context'
-        findings.append(row); seen[key]=row
+        row=deepcopy(row)
+        findings.append(row)
+        if origin=='manifest': unmatched_manifest.setdefault(key,[]).append(row)
     for job in manifest.get('jobs',[]):
+        require(isinstance(job,dict) and isinstance(job.get('steps',[]),list), 'Utility findings require job objects with step lists')
+        _string(job.get('name'), 'Utility job identity')
         for step in job.get('steps',[]):
+            require(isinstance(step,dict), 'Utility findings require step objects')
+            for field in ('name','program'): _string(step.get(field), 'Utility step '+field)
             finding(step.get('program','').upper(),job['name'],step['name'],'manifest')
     for path,text in sorted((files or {}).items()):
         job=''

@@ -180,7 +180,8 @@
       ],
       "references": [
         "https://www.ibm.com/support/pages/icetool-paper-sorttool",
-        "https://www.ibm.com/support/pages/dfsort"
+        "https://www.ibm.com/support/pages/dfsort",
+        "https://www.ibm.com/docs/en/zos/3.1.0?topic=icetool-select-operator"
       ]
     },
     {
@@ -499,7 +500,8 @@
         "Resolve PERFORM fall-through, INITIAL/CANCEL, working-storage lifetime, dynamic CALL, file status, SORT exits and exception handling; unsupported features remain blocked."
       ],
       "references": [
-        "https://www.ibm.com/docs/en/cobol-zos/6.5.0?topic=structure-reference-format"
+        "https://www.ibm.com/docs/en/cobol-zos/6.5.0?topic=structure-reference-format",
+        "https://www.ibm.com/docs/en/cobol-zos/6.4.0?topic=b-comment-lines"
       ]
     },
     {
@@ -508,11 +510,14 @@
       "checks": [
         "Expand PROC/INCLUDE, symbolic parameters and DD overrides with provenance; retain execution order and each call site.",
         "COND tests specify bypass conditions. IF/THEN/ELSE, abends, EVEN/ONLY and skipped-step return codes require explicit modeling; never translate COND by intuition.",
-        "Capture calendar/business-date, predecessors, triggers, reruns, restart points and external scheduler events. CA7 or other vendor definitions need application documentation."
+        "Capture calendar/business-date, predecessors, triggers, reruns, restart points and external scheduler events. CA7 or other vendor definitions need application documentation.",
+        "Identify DD * and DD DATA boundaries and any DLM setting; JCL-looking text inside in-stream data is not automatically an executing step. Preserve the consuming program and possible downstream effects as separate evidence."
       ],
       "references": [
         "https://www.ibm.com/docs/en/zos/3.1.0?topic=statement-cond-parameter",
-        "https://www.ibm.com/docs/en/zos-basic-skills?topic=do-jcl-exec-statements-positional-frequently-used-parameters"
+        "https://www.ibm.com/docs/en/zos-basic-skills?topic=do-jcl-exec-statements-positional-frequently-used-parameters",
+        "https://www.ibm.com/docs/en/zos/3.1.0?topic=statement-data-parameter",
+        "https://www.ibm.com/docs/en/zos/3.1.0?topic=statement-parameter"
       ]
     },
     {

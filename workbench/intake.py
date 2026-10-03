@@ -4,18 +4,26 @@ from io import BytesIO
 from .domain import ValidationError, identity, require, checked_zip
 
 HEADERS = ['Job order', 'Job', 'Step order', 'Step', 'Program or utility', 'Input files/tables', 'Output files/tables', 'Condition or dependency']
+LINE_SEPARATORS = '\u0085\u2028\u2029'
+
+
+def single_line(value):
+    return not any(ord(c) < 32 or c in LINE_SEPARATORS for c in value)
 
 
 def from_rows(pid, name, rows):
     identity(pid)
     require(isinstance(name, str) and 0 < len(name.strip()) <= 160, 'Process name is required and limited to 160 characters')
-    require(not any(ord(c) < 32 for c in name), 'Process name must be one line without control characters')
+    require(single_line(name), 'Process name must be one line without control characters')
+    require(isinstance(rows, (list, tuple)), 'Job steps must be a list of rows')
     require(0 < len(rows) <= 200, 'Supply between 1 and 200 job steps')
     jobs, seen, orders, methods = {}, set(), {}, {}
     for row in rows:
-        require(len(row) == 8, 'Each job/step row must have eight columns')
-        require(all(not isinstance(v,str) or (len(v)<=4096 and not any(c in v for c in '\r\n|')) for v in row),
+        require(isinstance(row, (list, tuple)) and len(row) == 8, 'Each job/step row must have eight columns')
+        require(all(not isinstance(v,str) or (len(v)<=4096 and single_line(v) and '|' not in v) for v in row),
                 'Intake cells must be single-line values without table delimiters, limited to 4096 characters')
+        require(all(row[i] is None or isinstance(row[i], str) for i in (5, 6, 7)),
+                'Input, output and condition cells must be text or blank')
         def order(value):
             require(type(value) is int or (isinstance(value,str) and re.fullmatch(r'[0-9]+',value.strip())),
                     'Job and step order must be positive integers; every populated row needs both orders')
@@ -38,7 +46,7 @@ def from_rows(pid, name, rows):
             'name': step, 'order': so, 'program': program,
             'inputs': [x.strip() for x in re.split('[;,]', str(row[5] or '')) if x.strip()],
             'outputs': [x.strip() for x in re.split('[;,]', str(row[6] or '')) if x.strip()],
-            'condition': str(row[7] or 'Unknown').strip()})
+            'condition': (row[7] or '').strip() or 'Unknown'})
     result = sorted(jobs.values(), key=lambda j: j['order'])
     for j in result: j['steps'].sort(key=lambda s: s['order'])
     return {'id': pid, 'name': name.strip(), 'jobs': result}
@@ -47,7 +55,9 @@ def from_rows(pid, name, rows):
 def parse_manifest(text):
     require(isinstance(text, str) and len(text) <= 128000, 'Markdown intake is too large')
     def attr(label):
-        matches = re.findall(r'^\s*[-*]?\s*' + label + r'\s*:\s*`?([^`\n]+)`?\s*$', text, re.M | re.I)
+        # Horizontal whitespace only: an empty attribute must never absorb
+        # the next line (for example the job-table header) as its value.
+        matches = re.findall(r'^[ \t]*[-*]?[ \t]*' + label + r'[ \t]*:[ \t]*`?([^`\r\n]+)`?[ \t]*\r?$', text, re.M | re.I)
         require(len(matches)==1, f'Supply exactly one {label}')
         return matches[0].strip()
     rows = [];header=False
@@ -113,5 +123,5 @@ def _parse_intake_xlsx(data):
         for r in range(5,ws.max_row+1):
             values=[ws.cell(r,c).value for c in range(1,9)]
             if any(v is not None and (not isinstance(v,str) or v.strip()) for v in values):rows.append(values)
-        return from_rows(str(ws['B1'].value or ''), str(ws['B2'].value or ''), rows)
+        return from_rows(ws['B1'].value, ws['B2'].value, rows)
     finally: book.close()

@@ -68,6 +68,17 @@ analysis/report extension before this release can accept them. The single SME
 packet supports at most 2,000 items; mandatory synthetic witnesses must fit the
 recorded 256-case-per-program budget or remain an explicit verification gap.
 
+Supported conditions contain at most 192 atomic comparisons (767 tokens).
+Persisted JSON is bounded to 256 nested levels, which includes the supported
+condition tree and its process-evidence wrappers. Excessive structure is
+rejected with a diagnostic. Level-77 standalone items and unnamed FILLER
+layouts require adapters; do not assign them to the preceding record group.
+
+The 500-scenario engineering review is documented in `docs/REVIEW_500.md`.
+Its tests exercise local fictional fixtures and frontend intake helpers under
+Node. Running the development review also needs the pinned frontend dependencies;
+normal operation still uses the committed UI bundle without Node installation.
+
 ## Failure and recovery matrix
 
 | What can go wrong | Detection / treatment | Required action or remaining boundary |

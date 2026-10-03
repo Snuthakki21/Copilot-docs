@@ -2,6 +2,7 @@
 import ast
 import re
 from .domain import require, sha
+from .reference import contract_version
 
 
 def expression(node):
@@ -13,7 +14,7 @@ def expression(node):
 
 def emit_program(program):
     require(not program['blockers'], 'Unsupported program cannot receive a complete executable translation')
-    require(program.get('target_contract_version', 1) in (1, 2), 'Unsupported target contract version')
+    contract_version(program)
     lines=['# Generated from source SHA256 '+program['source_hash'], '# Evidence class: SOURCE_DERIVED_EXPECTED', '# Semantic/dependency SHA256 '+program.get('semantic_hash',program['source_hash']), 'def run_program(record):']
     if program.get('target_contract_version') == 2:
         # Keep the exported function self-contained: callers cannot bypass a
@@ -68,15 +69,26 @@ def check_generated(code):
     require(len(function.args.args) == 1 and function.args.args[0].arg == 'record'
             and not function.args.posonlyargs and not function.args.kwonlyargs
             and not function.args.defaults and function.args.vararg is None
-            and function.args.kwarg is None and not function.decorator_list,
+            and function.args.kwarg is None and not function.decorator_list
+            and function.args.args[0].annotation is None and function.returns is None,
             'Generated target must accept exactly one record argument')
     allowed=(ast.Module,ast.FunctionDef,ast.arguments,ast.arg,ast.Assign,ast.Name,ast.Load,ast.Store,ast.Call,ast.Dict,ast.Constant,ast.List,ast.If,ast.Compare,ast.BoolOp,ast.And,ast.Or,ast.Eq,ast.NotEq,ast.Gt,ast.GtE,ast.Lt,ast.LtE,ast.IsNot,ast.NotIn,ast.Subscript,ast.Expr,ast.Attribute,ast.Return,ast.UnaryOp,ast.USub)
     for node in ast.walk(tree):
         require(isinstance(node,allowed),'Target includes an unsupported executable capability')
+        if isinstance(node,ast.FunctionDef):require(node is function,'Nested target functions are not allowed')
         if isinstance(node,ast.Name):require(node.id in {'run_program','record','row','trace','errors','dict','type','int','str','len'},'Unknown target identifier')
         if isinstance(node,ast.Attribute):require(isinstance(node.value,ast.Name) and ((node.value.id in {'trace','errors'} and node.attr=='append') or (node.value.id=='record' and node.attr=='get')),'Target attribute access is not allowed')
         if isinstance(node,ast.Call):require(len(node.args)==1 and not node.keywords and ((isinstance(node.func,ast.Name) and node.func.id in {'dict','type','len'}) or (isinstance(node.func,ast.Attribute) and node.func.attr in {'append','get'})),'Target call is not allowed')
-        if isinstance(node,ast.Assign):require(all((isinstance(t,ast.Name) and t.id in {'row','trace','errors'}) or (isinstance(t,ast.Subscript) and isinstance(t.value,ast.Name) and t.value.id=='row' and isinstance(t.slice,ast.Constant) and isinstance(t.slice.value,str)) for t in node.targets),'Unsafe assignment target')
+        if isinstance(node,ast.Assign):
+            require(len(node.targets)==1 and all((isinstance(t,ast.Name) and t.id in {'row','trace','errors'}) or (isinstance(t,ast.Subscript) and isinstance(t.value,ast.Name) and t.value.id=='row' and isinstance(t.slice,ast.Constant) and isinstance(t.slice.value,str)) for t in node.targets),'Unsafe assignment target')
+            destination=node.targets[0]
+            if isinstance(destination,ast.Name):
+                if destination.id=='row':
+                    require(isinstance(node.value,ast.Call) and isinstance(node.value.func,ast.Name)
+                            and node.value.func.id=='dict' and len(node.value.args)==1
+                            and isinstance(node.value.args[0],ast.Name) and node.value.args[0].id=='record',
+                            'Target row must be an independent record copy')
+                else:require(isinstance(node.value,ast.List) and not node.value.elts,'Target trace/errors must start as fresh lists')
     return tree
 
 

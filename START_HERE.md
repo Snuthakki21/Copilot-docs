@@ -78,3 +78,8 @@ Standalone generator: `PYTHONPATH=. python tools/synthetic_cases.py --source exa
 
 [docs/THIRTY_PASS_REVIEW.md](docs/THIRTY_PASS_REVIEW.md) records the 30-area
 adversarial review, reproduced fixes, repeatable checks and acceptance limits.
+
+[docs/REVIEW_500.md](docs/REVIEW_500.md) records the subsequent 500 distinct
+executable scenarios, corrective actions and exact evidence. The developer
+review command is `PYTHONPATH=. python tools/review500.py`; normal operators
+continue to use the Start/SME-return workflow above.

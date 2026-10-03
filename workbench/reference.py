@@ -1,7 +1,15 @@
 """Independent source-IR reference evaluation, never generated target outputs."""
+from .domain import require
+
+
+def contract_version(program):
+    version=program.get('target_contract_version',1)
+    require(type(version) is int and version in (1,2), 'Unsupported target contract version')
+    return version
 
 
 def input_errors(program, record):
+    contract_version(program)
     errors=[]
     if (type(record) is not dict if program.get('target_contract_version') == 2 else not isinstance(record,dict)):return ['record must be an object']
     if set(record)!=set(program['fields']):errors.append('field set differs from source layout')

@@ -201,9 +201,11 @@ class Coordinator:
     def import_answers(self,pid,data,reviewer):
         with self.lock:
             require_layout(self.root)
-            doc=self.ledger.get(pid);self.manifest_integrity(doc);require(doc['status']=='WAITING_SME','Process is not waiting for SME answers')
+            doc=self.ledger.get(pid);self.sources(doc);require(doc['status']=='WAITING_SME','Process is not waiting for SME answers')
             packet=decode(self.artifact(pid,'review/packet.json').read_bytes())
             require(packet.get('packet_hash')==doc['packet_hash'] and sha(encode({k:v for k,v in packet.items() if k!='packet_hash'}))==doc['packet_hash'],'Frozen SME packet integrity failed')
+            require(packet.get('process_id')==pid and packet.get('source_snapshot')==doc['analysis']['source_snapshot'],
+                    'Frozen SME packet does not belong to this process and source snapshot')
             answers=read_answers(data,packet,reviewer)
             returned=self.process_root(pid)/'input'/'sme-return.xlsx'
             if returned.exists():require(returned.read_bytes()==data,'Recovery return differs from the preserved SME file')
@@ -243,6 +245,15 @@ class Coordinator:
 
     def sources(self,doc):
         self.manifest_integrity(doc)
+        source_root=self.process_root(doc['id'])/'input'/'sources'
+        inventory=set()
+        for count,path in enumerate(source_root.rglob('*'),1):
+            require(count<=10000,'Frozen source traversal exceeds 10,000 entries')
+            require(not path.is_symlink() and (path.is_file() or path.is_dir()),
+                    'Source snapshot contains an unsafe file')
+            if path.is_file():inventory.add(path.relative_to(source_root).as_posix())
+        require(inventory==set(doc['source_files']),
+                'Source snapshot file inventory changed; every exported file must retain its frozen accounting')
         result={}
         for path,h in doc['source_files'].items():
             raw=safe_path(self.process_root(doc['id'])/'input'/'sources',path).read_bytes()

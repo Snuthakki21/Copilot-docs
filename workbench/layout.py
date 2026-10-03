@@ -93,6 +93,8 @@ def validate_workspace(root):
         for child in knowledge.iterdir():
             if child.name not in {'inbox', 'records.json', 'INDEX.md', 'mainframe-catalog.json', 'application-knowledge.json', 'README.md'}:
                 issues.append(child.relative_to(root).as_posix() + ': knowledge belongs in the standard/application catalog, canonical index/records or inbox')
+            elif (child.name == 'inbox' and not child.is_dir()) or (child.name != 'inbox' and not child.is_file()):
+                issues.append(child.relative_to(root).as_posix() + ': knowledge inbox must be a directory and canonical entries must be files')
     return sorted(set(issues))
 
 

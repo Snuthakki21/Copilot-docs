@@ -228,6 +228,8 @@ def build_coverage(doc, workspace_root, checkpoint=None):
     states = {name:_program_evidence(doc, root, base, name, p, errors, checkpoint) for name,p in programs.items()}
     integrity = list(errors)+[s['error'] for s in states.values() if s.get('error')]
     job_state = _job_evidence(doc, root, base, errors, checkpoint)
+    if not job_state['verified']:
+        integrity.append('Job integration: '+job_state['reason'])
     by_path = {p['path']:(name,p) for name,p in programs.items()}
     referenced = {d['path'] for p in programs.values() for d in p.get('dependencies', [])}
     referenced.update(ref.rsplit(':',1)[0] for p in programs.values() for f in p.get('fields', {}).values() for ref in [f.get('source_ref','')] if ':' in ref)
@@ -367,7 +369,12 @@ def _cell(value):
 
 
 def write_coverage(model, report_root):
-    root = Path(report_root); root.mkdir(parents=True, exist_ok=True)
+    root = Path(report_root)
+    names = ('coverage.json','coverage.csv','coverage.xlsx','coverage.html')
+    require(not root.is_symlink() and not any(p.is_symlink() for p in root.parents), 'Unsafe coverage output path')
+    require(not any((root/name).exists() or (root/name).is_symlink() for name in names),
+            'Coverage evidence already exists; create a new report version')
+    root.mkdir(parents=True, exist_ok=True)
     atomic_json(root/'coverage.json', model)
     output = StringIO(); writer = csv.writer(output); writer.writerow(COLUMNS)
     for row in model['rows']: writer.writerow([_cell(row.get(c)) for c in COLUMNS])
@@ -378,7 +385,7 @@ def write_coverage(model, report_root):
         raw=json.dumps(value,ensure_ascii=False,sort_keys=True) if isinstance(value,(list,dict)) else '' if value is None else str(value)
         invalid=bool(re.search(r'[\x00-\x08\x0b\x0c\x0e-\x1f]',raw))
         preserved=json.dumps(raw,ensure_ascii=True) if invalid else raw
-        if len(preserved)>32767 or invalid:
+        if len(_cell(value))>32767 or invalid:
             for sequence,offset in enumerate(range(0,len(preserved),30000),1):
                 chunks.append([table,row_number,column,sequence,preserved[offset:offset+30000],sha(raw),'json_string' if invalid else 'literal'])
                 chunks.cell(chunks.max_row,5).data_type='s'
@@ -415,4 +422,4 @@ def write_coverage(model, report_root):
     reopened = load_workbook(root/'coverage.xlsx', read_only=True)
     try: require(reopened['Source lines'].max_row == len(model['rows'])+1, 'Coverage workbook row count changed')
     finally: reopened.close()
-    return [root/name for name in ('coverage.json','coverage.csv','coverage.xlsx','coverage.html')]
+    return [root/name for name in names]

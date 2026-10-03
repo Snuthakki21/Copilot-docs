@@ -257,7 +257,7 @@ def inspect_workspace(workspace, manifest=None, *, port=None, environ=None, coor
             ZoweReader(env['WB_ZOWE_PROFILE'])
             require(shutil.which('zowe', path=env.get('PATH', os.defpath)), 'Zowe CLI is not on PATH')
             hint = env.get('WB_DATASET_HINT', '*')
-            require(re.fullmatch(r'[A-Za-z0-9@$#.*()_-]{1,150}', hint) and not hint.startswith('-'), 'Invalid dataset hint')
+            require(isinstance(hint,str) and re.fullmatch(r'[A-Za-z0-9@$#.*()_-]{1,150}', hint) and not hint.startswith('-'), 'Invalid dataset hint')
             add('zowe', 'UNVERIFIED', 'Zowe CLI and profile syntax are configured; credentials, profile existence, access and catalog completeness are unverified.',
                 'Authenticate the approved read-only profile locally; review discovery errors or truncation during analysis.')
         except ValidationError:
@@ -265,7 +265,8 @@ def inspect_workspace(workspace, manifest=None, *, port=None, environ=None, coor
     else: add('zowe', 'NOT_CONFIGURED', 'Optional Zowe profile is not configured.', 'Set WB_ZOWE_PROFILE after local authentication if live discovery is needed.')
     if env.get('WB_LLM_URL'):
         try:
-            endpoint(env['WB_LLM_URL']); require(bool(env.get('WB_LLM_MODEL')), 'Missing model')
+            from .provider import StructuredProvider
+            StructuredProvider(env['WB_LLM_URL'],env.get('WB_LLM_MODEL'),env.get('WB_LLM_TOKEN',''))
             require(env.get('WB_ALLOW_SOURCE_EGRESS', 'false') in ('true', 'false'), 'Invalid source egress setting')
             egress = env.get('WB_ALLOW_SOURCE_EGRESS') == 'true'
             add('llm', 'UNVERIFIED', 'Provider configuration is syntactically valid; reachability and response compatibility are unverified. ' +

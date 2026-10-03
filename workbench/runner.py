@@ -3,6 +3,7 @@ import argparse
 from io import BytesIO
 import json
 from pathlib import Path
+import shlex
 import time
 import zipfile
 from .coordinator import Coordinator
@@ -88,6 +89,15 @@ def bundle_process(coordinator, pid):
         manifest_integrity(coordinator, doc)
         require(doc['status'] in TERMINAL, 'Bundle requires completed or cancelled evidence; inspect status first')
         require(doc.get('report_verified'), 'Bundle requires inspected report artifacts')
+        report_hashes = doc.get('report_hashes')
+        required_reports = {'metrics.json','metrics.csv','metrics.xlsx','management.pptx','inspection.json',
+                            'coverage.json','coverage.csv','coverage.xlsx','coverage.html'}
+        require(isinstance(report_hashes, dict) and bool(report_hashes)
+                and required_reports.issubset({Path(name).name for name in report_hashes}),
+                'Bundle requires the complete inspected report hash baseline')
+        require(all(name in doc['artifacts'] and name.startswith('reports/') for name in report_hashes)
+                and len({str(Path(name).parent) for name in report_hashes}) == 1,
+                'Bundle report hashes contain missing, orphaned or inconsistent inspected artifacts')
         coordinator.review_integrity(doc)
         names = sorted(set(['input/process-input.md'] +
                            ['input/sources/' + name for name in doc['source_files']] +
@@ -107,9 +117,9 @@ def bundle_process(coordinator, pid):
         if doc['packet_imported']:
             require(sha(entries['input/sme-return.xlsx']) == doc['answers']['return_hash'],
                     'Bundle SME return bytes differ from the accepted return')
-        for name, recorded in doc.get('report_hashes', {}).items():
-            if name in entries:
-                require(sha(entries[name]) == recorded, 'Bundle report bytes differ from inspected evidence: ' + name)
+        for name, recorded in report_hashes.items():
+            require(name in entries and sha(entries[name]) == recorded,
+                    'Bundle report bytes differ from inspected evidence: ' + name)
         coordinator.sources(doc)
         fingerprint = sha(json.dumps({name: sha(data) for name, data in entries.items()}, sort_keys=True))
         relative = 'reports/bundle-' + fingerprint[:16] + '.zip'
@@ -135,7 +145,8 @@ def summary(coordinator, doc, timed_out=False):
                    'packet': [str(root / name) for name in doc['artifacts'] if name.startswith('review/')],
                    'reports': [str(root / name) for name in doc['artifacts'] if name.startswith('reports/')],
                    'sme_return_inbox': str(root / INBOX),
-                   'continuation': 'python -m workbench.runner resume ' + pid + ' --workspace "' + str(coordinator.root) + '" --reviewer "ACTUAL REVIEWER"'})
+                   'continuation': shlex.join(['python', '-m', 'workbench.runner', 'resume', pid,
+                                              '--workspace', str(coordinator.root), '--reviewer', 'ACTUAL REVIEWER'])})
     if doc['status'] == 'WAITING_SME':
         result['message'] = 'Deliver the issued checklist for the one SME review. Preserve Context/questions. Place the actual returned workbook in sme_return_inbox and resume with reviewer attribution. Never generate SME answers.'
     elif timed_out: result['message'] = 'Bounded wait expired; evidence is preserved. Inspect status and run resume to continue.'

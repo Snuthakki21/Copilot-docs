@@ -96,7 +96,13 @@ def report_portfolio(ledger,doc,final_status):
 
 
 def generate_reports(ledger,doc,root,checkpoint=None):
-    root=Path(root);root.mkdir(parents=True,exist_ok=True)
+    root=Path(root)
+    names=('metrics.json','metrics.csv','metrics.xlsx','management.pptx','inspection.json',
+           'coverage.json','coverage.csv','coverage.xlsx','coverage.html')
+    require(not root.is_symlink() and not any(p.is_symlink() for p in root.parents),'Unsafe report output path')
+    require(not any((root/name).exists() or (root/name).is_symlink() for name in names),
+            'Report evidence already exists; create a new report version')
+    root.mkdir(parents=True,exist_ok=True)
     coverage=build_coverage(doc,ledger.root,checkpoint=checkpoint)
     coverage_paths=write_coverage(coverage,root)
     final_status='COMPLETED' if coverage['summary']['completion_eligible'] and not doc.get('blockers') and not doc.get('cancel_requested') else 'COMPLETED_WITH_BLOCKERS'
@@ -137,7 +143,7 @@ def generate_reports(ledger,doc,root,checkpoint=None):
         for par in b.text_frame.paragraphs:par.font.size=Pt(13);par.font.color.rgb=RGBColor(70,85,105)
     slide('Modernization POC · '+doc['id'],[['Source COBOL programs',m['source_programs']],['Copybooks',m['source_copybooks']],['Generated Python programs',m['target_python_programs']],['Synthetic cases / matching',f"{m['synthetic_cases']} / {m['matching_cases']}"],['Unresolved blockers',m['unresolved_blockers']]],'Fictional demonstration' if doc['demo'] else 'Evidence is source-derived; no mainframe program was executed.')
     slide('Before → after',[['BMS screens → React business screens',f"{m['source_bms_screens']} → 0"],['Business REST APIs generated',0],['All selected source code LOC → program Python LOC',f"{m['source_code_loc']} → {m['target_program_code_loc']}"],['CICS / VSAM / inbound / outbound counts','Unknown until evidenced'],['Target environment','Python / SQLite (non-production)']],'Workbench UI and its control endpoints are excluded from modernized business-screen/API counts. LOC is a size metric, not a parity metric.')
-    slide('Rule verification',[['Extracted known rules',m['rules_documented']],['SME-confirmed + tested rules',m['rules_verified']],['Known-rule verification',str(m['known_rule_verification_percent'])+'%'],['Unsupported source lines',m['unsupported_source_lines']],['Observed mainframe parity','NOT established']],'The percentage covers extracted known rules only. Unknown/unsupported behavior remains a blocker; passing synthetic tests is not proof of full legacy parity.')
+    slide('Rule verification',[['Extracted known rules',m['rules_documented']],['SME-confirmed + tested rules',m['rules_verified']],['Known-rule verification','Unknown' if m['known_rule_verification_percent'] is None else str(m['known_rule_verification_percent'])+'%'],['Unsupported source lines',m['unsupported_source_lines']],['Observed mainframe parity','NOT established']],'The percentage covers extracted known rules only. Unknown/unsupported behavior remains a blocker; passing synthetic tests is not proof of full legacy parity.')
     cs=coverage['summary']
     slide('Complete source accountability',[
         ['Frozen export files / physical lines',f"{cs['source_files']} / {cs['source_lines']}"],

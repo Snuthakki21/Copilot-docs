@@ -15,8 +15,13 @@ MAX_RESPONSE_BYTES=1024*1024
 
 
 def endpoint(url):
-    parts=urlsplit(url)
+    require(isinstance(url,str) and 0<len(url)<=8192 and not any(c.isspace() or ord(c)<32 or ord(c)==127 or c=='\\' for c in url),'Use an unambiguous HTTP(S) endpoint')
+    try:
+        parts=urlsplit(url)
+        port=parts.port
+    except ValueError as exc:raise ValidationError('Invalid HTTP(S) endpoint authority or port') from exc
     require(parts.scheme in ('http','https') and parts.hostname and not parts.username and not parts.password and not parts.fragment,'Use a configured HTTP(S) endpoint without embedded credentials')
+    require(port is None or 1<=port<=65535,'Invalid HTTP(S) endpoint port')
     require(parts.scheme=='https' or parts.hostname in ('localhost','127.0.0.1','::1'),'Plain HTTP is allowed only on loopback')
     return url
 
@@ -35,7 +40,7 @@ def _sse_response(response,request_id):
             if fields:
                 message=decode(b'\n'.join(fields),MAX_RESPONSE_BYTES);fields=[]
                 require(isinstance(message,dict),'Invalid SSE JSON-RPC message')
-                if message.get('id')==request_id and ('result' in message or 'error' in message):return message
+                if type(message.get('id')) is type(request_id) and message.get('id')==request_id and ('result' in message or 'error' in message):return message
                 require('id' not in message,'Unsolicited server requests are unsupported')
             if not line:break
         elif line.startswith(b'data:'):fields.append(line[5:].lstrip(b' ').rstrip(b'\r\n'))
@@ -72,6 +77,10 @@ class Db2MCP:
         if self.session:headers['Mcp-Session-Id']=self.session
         return headers
     def rpc(self,method,params):
+        require(method in ('initialize','tools/list','tools/call') and isinstance(params,dict),'Only the read-only MCP protocol operations are allowed')
+        if method=='tools/call':
+            require(set(params)<={'name','arguments'} and isinstance(params.get('name'),str),'Invalid MCP read operation')
+            catalog_sql(params['name'],params.get('arguments',{}))
         require(method=='initialize' or self.protocol in MCP_VERSIONS,'Initialize and negotiate MCP before calling tools')
         self.counter+=1
         result,h=post_json(self.url,{'jsonrpc':'2.0','id':self.counter,'method':method,'params':params},self.token,self.headers(),timeout=self.timeout)
@@ -107,11 +116,21 @@ class Db2MCP:
     def call(self,name,args):
         require(name in READ_TOOLS,'Only the explicit read-only Db2 operations are allowed')
         require(name in self.tools,'Required read capability is unavailable')
+        catalog_sql(name,args)
         result=self.rpc('tools/call',{'name':name,'arguments':args})
-        require(isinstance(result,dict) and not result.get('isError'),'Db2 read failed')
-        if 'structuredContent' in result:return result['structuredContent']
-        for c in result.get('content',[]):
-            if c.get('type')=='text':return decode(c['text'].encode(),1024*1024)
+        require(isinstance(result,dict) and result.get('isError',False) is False,'Db2 read failed')
+        if 'structuredContent' in result:
+            require(isinstance(result['structuredContent'],dict),'Db2 structured data must be an object')
+            return result['structuredContent']
+        content=result.get('content',[])
+        require(isinstance(content,list) and all(isinstance(c,dict) for c in content),'Invalid Db2 content blocks')
+        for c in content:
+            if c.get('type')=='text':
+                require(isinstance(c.get('text'),str),'Db2 text content must be a string')
+                try:data=decode(c['text'].encode(),MAX_RESPONSE_BYTES)
+                except UnicodeError as exc:raise ValidationError('Db2 text content must be valid UTF-8') from exc
+                require(isinstance(data,dict),'Db2 structured data must be an object')
+                return data
         raise ValidationError('Db2 tool returned no structured data')
     def list_schemas(self,after_schema=''):return self.call('db2_list_schemas',{'after_schema':after_schema,'limit':100})
     def list_tables(self,schema=None,after_schema='',after_table=''):
@@ -140,8 +159,9 @@ def catalog_sql(operation,args):
         after=args.get('after_schema','');require(isinstance(after,str) and len(after)<=128,'Invalid schema cursor')
         return f'SELECT DISTINCT CREATOR FROM SYSIBM.SYSTABLES WHERE CREATOR > ? ORDER BY CREATOR FETCH FIRST {limit+1} ROWS ONLY WITH UR',[after]
     if operation=='db2_list_tables':
-        schema=args.get('schema');pattern=schema if schema else '%'
-        require(isinstance(pattern,str) and len(pattern)<=128,'Invalid schema pattern')
+        schema=args.get('schema')
+        require(schema is None or isinstance(schema,str) and len(schema)<=128,'Invalid schema pattern')
+        pattern=schema if schema else '%'
         a,b=args.get('after_schema',''),args.get('after_table','')
         require(isinstance(a,str) and isinstance(b,str) and len(a)<=128 and len(b)<=128,'Invalid catalog cursor')
         return f"SELECT CREATOR,NAME,TYPE FROM SYSIBM.SYSTABLES WHERE CREATOR LIKE ? AND (CREATOR > ? OR (CREATOR = ? AND NAME > ?)) ORDER BY CREATOR,NAME FETCH FIRST {limit+1} ROWS ONLY WITH UR",[pattern,a,a,b]
@@ -155,7 +175,7 @@ def catalog_sql(operation,args):
 def discover_catalog(client,kind,max_pages=10,max_bytes=2*1024*1024,max_seconds=60):
     """Follow the supplied gateway's keyset cursors within explicit budgets."""
     require(kind in ('schemas','tables') and type(max_pages)is int and 1<=max_pages<=50,'Invalid catalog page budget')
-    require(type(max_bytes)is int and 1024<=max_bytes<=8*1024*1024 and 0<max_seconds<=300,'Invalid catalog resource budget')
+    require(type(max_bytes)is int and 1024<=max_bytes<=8*1024*1024 and type(max_seconds) in (int,float) and 0<max_seconds<=300,'Invalid catalog resource budget')
     output={'rows':[],'pages':0,'coverage':'PARTIAL','reason':'page_budget','next_cursor':None,
             'bounded':True,'snapshot_consistent':False,'scope':'Account-visible catalog traversal, not an authorization inventory or consistent snapshot',
             'budgets':{'max_pages':max_pages,'max_bytes':max_bytes,'max_seconds':max_seconds}}
@@ -170,7 +190,9 @@ def discover_catalog(client,kind,max_pages=10,max_bytes=2*1024*1024,max_seconds=
                 output['reason']='page_read_failed';break
             if not isinstance(page,dict) or not isinstance(page.get('rows'),list) or len(page['rows'])>100 or not all(isinstance(row,dict) for row in page['rows']):
                 output['reason']='invalid_page';break
-            page_size=len(encode(page))
+            try:page_size=len(encode(page))
+            except (ValueError,TypeError,UnicodeError,RecursionError):
+                output['reason']='invalid_page';break
             if size+page_size>max_bytes:output['reason']='byte_budget';break
             # Reject a repeated continuation before adding the repeated page.
             if page.get('has_more') is True and isinstance(page.get('next_cursor'),dict) and encode(page['next_cursor']) in seen:
@@ -212,7 +234,7 @@ def bounded_command(command,env,timeout=20,limit=1024*1024):
 
 
 class ZoweReader:
-    def __init__(self,profile):self.profile=profile;require(re.fullmatch(r'[A-Za-z0-9_-]{1,80}',profile),'Unsafe Zowe profile alias')
+    def __init__(self,profile):self.profile=profile;require(isinstance(profile,str) and re.fullmatch(r'[A-Za-z0-9_-]{1,80}',profile),'Unsafe Zowe profile alias')
     def operation(self,op,value):
         require(op in ('list_data_sets','list_members','read_member'),'Zowe source operations are strictly read-only')
         require(isinstance(value,str) and re.fullmatch(r'[A-Za-z0-9@$#.*()_-]{1,150}',value) and not value.startswith('-'),'Unsafe dataset/member value')

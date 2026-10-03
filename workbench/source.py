@@ -13,7 +13,9 @@ TOKEN = re.compile(r'"(?:[^"]|"")*"|\'(?:[^\']|\'\')*\'|>=|<=|<>|=|>|<|-?\d+|[A-
 
 def literal(token):
     if re.fullmatch(r'"(?:[^"\n]|"")*"|\'(?:[^\'\n]|\'\')*\'', token): return token[1:-1].replace(token[0]*2, token[0])
-    if re.fullmatch(r'-?\d+', token): return int(token)
+    if re.fullmatch(r'-?[0-9]+', token):
+        require(len(token)<=128, 'Numeric literal exceeds supported parsing bound')
+        return int(token)
     if token.upper() in ('SPACE','SPACES'): return ' '
     if token.upper() in ('ZERO','ZEROS','ZEROES'): return 0
     raise ValidationError('Only explicit numeric/string literal values are supported')
@@ -22,6 +24,7 @@ def literal(token):
 def condition(text, fields):
     stripped = text.strip().rstrip('.')
     tokens = TOKEN.findall(stripped)
+    require(len(tokens)<=767, 'Condition exceeds supported comparison bound')
     require(''.join(tokens).replace(' ', '').upper() == re.sub(r'\s+', '', stripped).upper(), 'Unsupported condition syntax')
     pos = 0
     def operand():
@@ -163,7 +166,7 @@ def analyze_program(path, text, files, classifications=None):
     for i,(kind,line) in enumerate(lines,1):p['coverage'].append({'line':i,'disposition':kind if kind in ('blank','comment') else 'unaccounted','source':line,'original':originals[i-1]})
     procedure=False
     proc=[]
-    group='INPUT';groups=set();division_order=[];section=None
+    group=None;groups=set();division_order=[];section=None;sections=set()
     def block(msg, indices):
         p['blockers'].append({'kind':'unsupported_source','message':msg,'path':path,'lines':indices})
         for n in indices:p['coverage'][n-1]['disposition']='unsupported'
@@ -171,12 +174,19 @@ def analyze_program(path, text, files, classifications=None):
         nonlocal group
         gm=re.fullmatch(r'01\s+('+NAME+r')\.',line,re.I)
         if gm:
-            group=gm.group(1).upper();require(group not in groups,'Duplicate record group names need qualification support');groups.add(group);return True
+            group=gm.group(1).upper()
+            require(group!='FILLER', 'Unnamed FILLER groups need a layout adapter')
+            require(group not in groups and group not in p['fields'],'Duplicate record group names need qualification support');groups.add(group);return True
         fm=re.fullmatch(r'(?:05|77)\s+('+NAME+r')\s+PIC(?:TURE)?\s+(X|9)(?:\((\d+)\))?(?:\s+VALUE\s+(.+?))?\.',line,re.I)
         if not fm:return False
-        key,typ,width,value=fm.groups();key=key.upper();typ=typ.upper();width=int(width or 1)
+        require(not re.match(r'77\s',line), 'Standalone level-77 linkage items need an explicit USING/layout adapter')
+        require(group is not None, 'Level-05 field requires a preceding level-01 record group')
+        key,typ,width,value=fm.groups();key=key.upper();typ=typ.upper()
+        require(key!='FILLER', 'Unnamed FILLER fields need a layout adapter')
+        require(len(width or '1')<=32, 'PICTURE width token exceeds supported parsing bound')
+        width=int(width or 1)
         require(1<=width<=18 if typ=='9' else 1<=width<=256,'PICTURE width outside supported limit')
-        require(key not in p['fields'], 'Duplicate field names need qualification support')
+        require(key not in p['fields'] and key not in groups, 'Duplicate field names need qualification support')
         spec={'type':'integer' if typ=='9' else 'string','width':width,'group':group,'source_ref':origin,'storage_section':section,'default':0 if typ=='9' else ' '*width}
         if typ=='9':spec.update({'min':0,'max':10**width-1})
         if value:
@@ -195,14 +205,17 @@ def analyze_program(path, text, files, classifications=None):
                 if procedure or not pm:block('Unsupported or repeated PROCEDURE DIVISION',[i]);continue
                 if 0 not in division_order or 2 not in division_order:block('IDENTIFICATION and DATA DIVISION are required before PROCEDURE',[i])
                 if not pm[1] or set(pm[1].split())!=groups or len(pm[1].split())!=len(groups):block('PROCEDURE USING must map each declared record group exactly once',[i])
+                if groups-{f['group'] for f in p['fields'].values()}:block('Every LINKAGE group requires a supported field layout',[i])
                 elif p['coverage'][i-1]['disposition']!='unsupported':p['coverage'][i-1]['disposition']='structure'
                 procedure=True;continue
             if procedure:proc.append((i,line));continue
             if upper in ('LINKAGE SECTION.','WORKING-STORAGE SECTION.','FILE SECTION.'):
                 section=upper.split()[0]
-                if section!='LINKAGE':block('Storage lifetime or file binding needs an adapter; only caller-owned LINKAGE records are supported',[i])
+                if section in sections:block('Repeated record SECTION is unsupported',[i])
+                elif section!='LINKAGE':block('Storage lifetime or file binding needs an adapter; only caller-owned LINKAGE records are supported',[i])
                 elif not division_order or division_order[-1]!=2:block('Record SECTION requires DATA DIVISION',[i])
                 else:p['coverage'][i-1]['disposition']='structure'
+                sections.add(section)
                 continue
             cm=re.fullmatch(r'COPY\s+('+NAME+r')\.',line,re.I)
             if cm:
@@ -227,6 +240,8 @@ def analyze_program(path, text, files, classifications=None):
                 else:p['coverage'][i-1]['disposition']='data_layout'
                 continue
             if re.fullmatch(r'(IDENTIFICATION|ENVIRONMENT|DATA) DIVISION\.|(LINKAGE|WORKING-STORAGE|FILE) SECTION\.|PROGRAM-ID\.\s*'+NAME+r'\.',upper):
+                if upper.startswith('PROGRAM-ID.') and (not division_order or division_order[-1]!=0):
+                    block('PROGRAM-ID must belong to IDENTIFICATION DIVISION',[i]);continue
                 if upper.endswith(' DIVISION.'):
                     rank={'IDENTIFICATION DIVISION.':0,'ENVIRONMENT DIVISION.':1,'DATA DIVISION.':2}[upper]
                     if division_order and rank<=division_order[-1]:block('Repeated or out-of-order DIVISION',[i]);continue
@@ -238,15 +253,16 @@ def analyze_program(path, text, files, classifications=None):
     if not p['fields']:block('No supported source field layout',[])
     cursor=0;terminated=False
     while cursor<len(proc):
-        i,line=proc[cursor];upper=line.upper().rstrip('.')
+        i,line=proc[cursor];upper=line.upper().removesuffix('.')
         if terminated:block('Executable source after terminal statement',[i]);cursor+=1;continue
         if upper in ('GOBACK','STOP RUN'):
             p['coverage'][i-1]['disposition']='terminal';terminated=True;cursor+=1;continue
-        if re.fullmatch(NAME+r'\.',line):p['coverage'][i-1]['disposition']='paragraph';cursor+=1;continue
+        reserved={'ACCEPT','ADD','ALTER','CALL','CANCEL','CLOSE','COMPUTE','CONTINUE','DELETE','DISPLAY','DIVIDE','ELSE','END-IF','EVALUATE','EXIT','GO','GOBACK','IF','INITIALIZE','INSPECT','MERGE','MOVE','MULTIPLY','OPEN','PERFORM','READ','RELEASE','RETURN','REWRITE','SEARCH','SET','SORT','START','STOP','STRING','SUBTRACT','UNSTRING','WRITE'}
+        if re.fullmatch(NAME+r'\.',line,re.I) and upper not in reserved:p['coverage'][i-1]['disposition']='paragraph';cursor+=1;continue
         if not upper.startswith('IF '):block('Unsupported executable statement: '+line[:100],[i]);cursor+=1;continue
         start=cursor;depth=1;cursor+=1;else_at=None;nested=False
         while cursor<len(proc) and depth:
-            u=proc[cursor][1].upper().rstrip('.')
+            u=proc[cursor][1].upper().removesuffix('.')
             if u.startswith('IF '):depth+=1;nested=True
             if u=='END-IF':depth-=1
             if u=='ELSE' and depth==1:else_at=cursor
@@ -256,6 +272,8 @@ def analyze_program(path, text, files, classifications=None):
         try:
             require(not any(x[1].rstrip().endswith('.') for x in proc[start:cursor]), 'Sentence period inside IF changes implicit scope; unsupported')
             require(sum(x[1].upper().rstrip('.')=='ELSE' for x in proc[start:cursor])<=1,'Repeated ELSE is unsupported')
+            require((else_at if else_at is not None else cursor)>start+1, 'Empty IF body is unsupported; use explicit CONTINUE')
+            require(else_at is None or cursor>else_at+1, 'Empty ELSE body is unsupported; use explicit CONTINUE')
             pred=condition(line[3:],p['fields'])
             then=assignments([x[1] for x in proc[start+1:else_at if else_at is not None else cursor]],p['fields'])
             otherwise=assignments([x[1] for x in proc[else_at+1:cursor]],p['fields']) if else_at is not None else []

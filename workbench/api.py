@@ -22,11 +22,13 @@ def create_app(root, origin='http://127.0.0.1:8765'):
     static=Path(__file__).with_name('static')
     @app.middleware('http')
     async def boundary(request, call_next):
-        if request.headers.get('host')!=origin.split('://',1)[1]:return JSONResponse({'error':'Invalid host'},400)
-        if request.method not in ('GET','HEAD'):
-            if request.headers.get('origin')!=origin or request.headers.get('x-workbench-token')!=token:return JSONResponse({'error':'Same-origin session required'},403)
-        try:response=await call_next(request)
-        except Exception:response=JSONResponse({'error':'Operation failed; inspect the local event ledger'},500)
+        if request.headers.getlist('host')!=[origin.split('://',1)[1]]:
+            response=JSONResponse({'error':'Invalid host'},400)
+        elif request.method not in ('GET','HEAD') and (request.headers.getlist('origin')!=[origin] or request.headers.getlist('x-workbench-token')!=[token]):
+            response=JSONResponse({'error':'Same-origin session required'},403)
+        else:
+            try:response=await call_next(request)
+            except Exception:response=JSONResponse({'error':'Operation failed; inspect the local event ledger'},500)
         response.headers['Cache-Control']='no-store'
         response.headers['X-Content-Type-Options']='nosniff'
         response.headers['Content-Security-Policy']="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"

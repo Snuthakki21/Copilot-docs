@@ -68,6 +68,7 @@ def packet_document(process):
         items.append({'id':f'LLM_{n:03d}','question':text,'evidence':'Unverified LLM suggestion; validate against source/context','kind':'provider_suggestion'})
     for i,b in enumerate(a['blockers']):items.append({'id':f'B_{i:03d}','question':'Is this unresolved item described correctly? If no, explain what it should do. '+b['message'],'evidence':b.get('path','Source/intake evidence'),'kind':'unresolved_item'})
     require(len(items)<=2000,'SME packet exceeds supported size; retain a scope blocker before issuing')
+    require(len({item['id'] for item in items})==len(items),'SME packet contains duplicate question identities')
     details={}
     for item in items:
         for field in ('question','evidence'):
@@ -96,8 +97,15 @@ def export_packet(process, directory):
     from docx import Document
     directory=Path(directory);document=packet_document(process)
     if directory.exists():
+        require(all((directory/name).is_file() and not (directory/name).is_symlink()
+                    for name in ('packet.json','sme-checklist.xlsx','sme-checklist.docx','sme-checklist.html')),
+                'Existing packet is incomplete; recover its preserved snapshot')
         existing=decode((directory/'packet.json').read_bytes())
-        require(existing['packet_hash']==document['packet_hash'],'Existing packet differs; cannot issue a second packet')
+        require(existing==document,'Existing packet differs; cannot issue a second packet')
+        original=read_answers((directory/'sme-checklist.xlsx').read_bytes(),existing,'Packet export validation')
+        require(all(item['answer']=='Unanswered' and not item['correction']
+                    and item['reviewer']=='Packet export validation' for item in original['items'].values()),
+                'Existing issued workbook contains answers; preserve the original blank packet')
         return existing
     directory.parent.mkdir(parents=True,exist_ok=True)
     # Process directories contain only registered evidence. A crash may leave a
@@ -159,6 +167,7 @@ def read_answers(data, packet, reviewer):
     book=load_workbook(BytesIO(data),read_only=False,data_only=False,keep_links=False)
     try:
         check_dimensions(book)
+        require(not any(sheet.merged_cells.ranges for sheet in book),'Merged cells are not accepted in returned review evidence')
         for name in ('Metadata','Context'):
             for cells,row in zip(book[name].iter_rows(),frozen[name]):
                 require(all(c.data_type!='f' for c in cells),'Formulas are not accepted in '+name)
@@ -173,7 +182,11 @@ def read_answers(data, packet, reviewer):
             require(rid in expected and rid not in answers,'Unknown or duplicate question ID')
             original=expected[rid]
             require(q==_celltext(_display_text(original,'question')) and ref==_celltext(_display_text(original,'evidence')) and kind==original['kind'],'Original question/evidence changed')
-            answer=str(answer or '').strip();correction=str(correction or '').strip();actor=str(actor or reviewer).strip()
+            require(answer is None or isinstance(answer,str),'Answer must be Yes, No, Not sure or blank')
+            require(actor is None or isinstance(actor,str),'Reviewer attribution must be text')
+            answer=('' if answer is None else answer).strip()
+            correction=('' if correction is None else str(correction)).strip()
+            actor=(reviewer if actor is None or actor=='' else actor).strip()
             require(answer in ('Yes','No','Not sure',''),'Answer must be Yes, No, Not sure or blank')
             require(len(correction)<=4000 and 0<len(actor)<=160,'Returned text exceeds supported bounds')
             answers[rid]={'answer':answer or 'Unanswered','correction':correction,'reviewer':actor,'question':original['question'],'kind':kind}

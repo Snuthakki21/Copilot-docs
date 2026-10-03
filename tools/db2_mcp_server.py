@@ -21,7 +21,9 @@ def execute(name,args):
     with pyodbc.connect(connection,autocommit=True,attrs_before={101:1},timeout=10) as db:
         cursor=db.cursor();cursor.timeout=15;cursor.execute(sql,*params)
         limit=args.get('limit',100);names=[x[0] for x in cursor.description]
+        require(names and all(isinstance(name,str) for name in names) and len(names)==len(set(names)),'Invalid or duplicate database column names')
         rows=cursor.fetchmany(limit if name=='db2_sample_rows' else limit+1)
+        require(all(len(row)==len(names) for row in rows),'Database row width differs from its column description')
         more=len(rows)>limit;rows=rows[:limit]
         records=[dict(zip(names,[v if v is None or type(v)in(str,int,float,bool) else str(v) for v in row])) for row in rows]
         next_cursor=None
@@ -33,7 +35,9 @@ def execute(name,args):
         result={'rows':records,'has_more':more if name!='db2_sample_rows' else None,'next_cursor':next_cursor,
                 'bounded':True,'read_only':True,'snapshot_consistent':False,
                 'coverage':'sample_only' if name=='db2_sample_rows' else 'catalog_page'}
-        require(len(encode(result))<=MAX_RESPONSE_BYTES-4096,'Database response exceeds byte bound')
+        try:encoded=encode(result)
+        except (ValueError,TypeError,UnicodeError) as exc:raise ValidationError('Database response contains invalid JSON values') from exc
+        require(len(encoded)<=MAX_RESPONSE_BYTES-4096,'Database response exceeds byte bound')
         return result
 
 
@@ -56,6 +60,11 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         request_id=None;status=400
         try:
+            # Duplicate security/framing headers are ambiguous across HTTP layers.
+            for header in ('Host','Origin','Authorization','Content-Length','Content-Type','MCP-Protocol-Version'):
+                require(len(self.headers.get_all(header,[]))<=1,'Duplicate request header')
+            require(self.headers.get('Transfer-Encoding') is None,'Transfer encoding is unsupported')
+            require(self.headers.get('Content-Type','').split(';',1)[0].strip().lower()=='application/json','JSON content type required')
             port=self.server.server_port
             require(self.headers.get('Host') in (f'127.0.0.1:{port}',f'localhost:{port}',f'[::1]:{port}'),'Invalid local host')
             origin=self.headers.get('Origin')
