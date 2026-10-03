@@ -1,0 +1,907 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-03",
+  "baseline_local_commit": "7c6edba57569a66a7ef8a287c6a0a5be2529db7e",
+  "baseline_published_commit": "69e356524973caef19aa762382169bbc61fe8d70",
+  "method": "Thirty distinct focused regression/adversarial passes; some gates deliberately overlap. This is not thirty complete-suite runs or an exhaustive proof.",
+  "initial_sweep": {
+    "schema_version": 1,
+    "created": "2026-10-03T16:15:04.655077+00:00",
+    "method": "Thirty distinct focused regression/adversarial passes; some gates deliberately overlap. This is not thirty complete-suite runs or an exhaustive proof.",
+    "source_fingerprint": "1770eee93d1dbe350ad53634d1e8e05d92068e33cf879362cbed2d3529ac0934",
+    "source_unchanged_during_review": true,
+    "iterations": [
+      {
+        "iteration": 1,
+        "focus": "Setup installation failures",
+        "tests": [
+          "test_review_integrity.SetupScriptTests"
+        ],
+        "tests_run": 6,
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 0.244,
+        "log_sha256": "6eb0f4b80ce3cee3893f22b442bb5d1cb7576d7a4638254d79b28124ee3a3a29"
+      },
+      {
+        "iteration": 2,
+        "focus": "Manifest row loss and identity collisions",
+        "tests": [
+          "test_intake_hardening"
+        ],
+        "tests_run": 11,
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 0.169,
+        "log_sha256": "912ed910aabadc47783d7cbfd640e70c2926dc2cb4d3fe9806758e313710e67e"
+      },
+      {
+        "iteration": 3,
+        "focus": "Forged Excel dimensions and hidden scope",
+        "tests": [
+          "test_iteration_regressions"
+        ],
+        "tests_run": 3,
+        "status": "FAIL",
+        "exit_code": 1,
+        "seconds": 0.199,
+        "log_sha256": "4ce2da95163d2e95b37a93a03a4b60781d99fd058a1b2a014e49be6234363633"
+      },
+      {
+        "iteration": 4,
+        "focus": "Portable paths and enforced folder ownership",
+        "tests": [
+          "test_layout",
+          "test_foundation"
+        ],
+        "tests_run": 17,
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 0.679,
+        "log_sha256": "318918f01617ff81196062cdaed784276ab69397b68e51a12972411e7b8ef663"
+      },
+      {
+        "iteration": 5,
+        "focus": "Offline preflight and resource bounds",
+        "tests": [
+          "test_preflight"
+        ],
+        "tests_run": 22,
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 1.424,
+        "log_sha256": "2d676d26006b34389f935aff22133b84dfe20533cfb8c500d0f1a9972f226f12"
+      },
+      {
+        "iteration": 6,
+        "focus": "Complete export and selected inventory",
+        "tests": [
+          "test_adversarial.AdversarialTests.test_all_export_paths_survive_asset_selection",
+          "test_coverage.CoverageTests.test_inventory_preserves_every_original_line_and_explicit_scope"
+        ],
+        "tests_run": 2,
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 0.694,
+        "log_sha256": "1ebf15d9a31059e78f79b47574c09cce38d8ac3e2193a129ce3c6f23f0d20e46"
+      },
+      {
+        "iteration": 7,
+        "focus": "Structural mainframe file classification",
+        "tests": [
+          "test_source_classification"
+        ],
+        "tests_run": 14,
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 0.279,
+        "log_sha256": "126b2b918d5376ce90dffd63accc0e207d0ba9183baa020b99e2009c57f31455"
+      },
+      {
+        "iteration": 8,
+        "focus": "Knowledge provenance and immutable snapshots",
+        "tests": [
+          "test_knowledge_workflow"
+        ],
+        "tests_run": 7,
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 0.405,
+        "log_sha256": "302f534c5d72bc8289075ea8ef580faa1a4d717ec139b38a1fc7ed015743bd04"
+      },
+      {
+        "iteration": 9,
+        "focus": "COPY closure and ambiguity",
+        "tests": [
+          "test_source.SourceTests.test_copybook_source_hash_and_rule_evidence",
+          "test_adversarial.AdversarialTests.test_ambiguous_copy_candidates_stay_in_selected_accounting",
+          "test_source_classification.ClassifiedSourceTests.test_duplicate_extensionless_copybooks_do_not_choose_first_match"
+        ],
+        "tests_run": 3,
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 0.172,
+        "log_sha256": "4d5d82749e85f5e139a1e9d817b07d6d4664867832ea4e26ba5cb29e688bca29"
+      },
+      {
+        "iteration": 10,
+        "focus": "JCL grammar and ordered source reconciliation",
+        "tests": [
+          "test_source.SourceTests.test_unsupported_jcl_options_and_manifest_disagreement_block",
+          "test_adversarial.AdversarialTests.test_dd_requires_io_adapter",
+          "test_adversarial.AdversarialTests.test_duplicate_jcl_job_declarations_are_not_merged"
+        ],
+        "tests_run": 3,
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 0.165,
+        "log_sha256": "b9b955e13f5eb3c2e3f465270afe041cdc6718735c2e3360eb26f1f7840795ee"
+      },
+      {
+        "iteration": 11,
+        "focus": "Standard and custom utility contracts",
+        "tests": [
+          "test_mainframe"
+        ],
+        "tests_run": 15,
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 0.141,
+        "log_sha256": "5bd99b690984cd881a4cac713f586390ef947cf577e2f8fbd0d829ab1416ef07"
+      },
+      {
+        "iteration": 12,
+        "focus": "COBOL storage and division lifetime",
+        "tests": [
+          "test_adversarial.AdversarialTests.test_working_storage_is_not_treated_as_caller_record",
+          "test_adversarial.AdversarialTests.test_missing_divisions_and_duplicate_groups_block"
+        ],
+        "tests_run": 2,
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 0.163,
+        "log_sha256": "b2f99a0fd9853dd85a658f64da9bc639ca2d89608ae2c4f1e29869181cb001d7"
+      },
+      {
+        "iteration": 13,
+        "focus": "Statement boundaries and unsupported syntax",
+        "tests": [
+          "test_adversarial.AdversarialTests.test_sentence_period_cannot_end_if_scope_silently",
+          "test_adversarial.AdversarialTests.test_malformed_move_literal_is_not_swallowed",
+          "test_source.SourceTests.test_unknown_statement_blocks_without_losing_source_lines",
+          "test_source.SourceTests.test_missing_copybook_and_nested_if_are_accounted"
+        ],
+        "tests_run": 4,
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 0.15,
+        "log_sha256": "4d67f4169cfa63ca107f1ea5b008e8a3b21a27b55d9942a118bd326b980a1548"
+      },
+      {
+        "iteration": 14,
+        "focus": "Numeric limits and fixed-width string semantics",
+        "tests": [
+          "test_source.SourceTests.test_string_field_ordering_and_out_of_range_initializers_block",
+          "test_source.SourceTests.test_cobol_string_comparisons_pad_literal_and_free_indentation",
+          "test_adversarial.AdversarialTests.test_lowercase_numeric_picture",
+          "test_adversarial.AdversarialTests.test_comment_marker_inside_literal"
+        ],
+        "tests_run": 4,
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 0.158,
+        "log_sha256": "723ff964398f2805a13a26d0c463337dad75c15026ec7a90947281bcc4dd13da"
+      },
+      {
+        "iteration": 15,
+        "focus": "Decision precedence and sequential effects",
+        "tests": [
+          "test_adversarial.AdversarialTests.test_and_precedes_or_and_quoted_literals_stay_case_sensitive",
+          "test_source.SourceTests.test_source_threshold_else_and_sequential_effect"
+        ],
+        "tests_run": 2,
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 0.168,
+        "log_sha256": "067d731036316da3c84e947b9bc43baf890f1fc99a24a05d960af97345c6758b"
+      },
+      {
+        "iteration": 16,
+        "focus": "Synthetic witnesses and case-budget gaps",
+        "tests": [
+          "test_adversarial.AdversarialTests.test_budget_exhaustion_explains_missing_boundary_obligations",
+          "test_source.SourceTests.test_boundary_witnesses_and_mutated_target_detected"
+        ],
+        "tests_run": 2,
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 0.166,
+        "log_sha256": "71ab5bff7c399d8c7642315c9e47884066ca45ebc411f11f5e4e87eb766e5e2b"
+      },
+      {
+        "iteration": 17,
+        "focus": "Independent expectations and forged oracles",
+        "tests": [
+          "test_adversarial.AdversarialTests.test_frozen_oracle_and_coverage_cannot_be_forged"
+        ],
+        "tests_run": 1,
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 0.163,
+        "log_sha256": "364be876f2cb6f74228ee7f7f0542efbf243305713a92578e1bf2efcb4b46b32"
+      },
+      {
+        "iteration": 18,
+        "focus": "Exported target input and executable capabilities",
+        "tests": [
+          "test_target_boundary",
+          "test_source.SourceTests.test_target_cannot_import_or_call_unknown_functions"
+        ],
+        "tests_run": 11,
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 0.259,
+        "log_sha256": "8874ef8e8286137af21d159c3fec8013cffb8d0e6b8504746c961f2291bea3e9"
+      },
+      {
+        "iteration": 19,
+        "focus": "Every-rule mutations and masked effects",
+        "tests": [
+          "test_adversarial.AdversarialTests.test_mutation_reports_masked_effect_without_false_credit",
+          "test_adversarial.AdversarialTests.test_adversarial_review_covers_each_rule_and_effect"
+        ],
+        "tests_run": 2,
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 0.209,
+        "log_sha256": "ca20c31517877bb8e24d5039ca2edcc4701fba94a327c99a0f63dfccee6da467"
+      },
+      {
+        "iteration": 20,
+        "focus": "Job dispatch, record propagation and tampered templates",
+        "tests": [
+          "test_source.SourceTests.test_generated_jobs_propagate_record_to_next_step",
+          "test_adversarial.AdversarialTests.test_orchestration_rejects_modified_template_before_execution",
+          "test_coverage.CoverageTests.test_jcl_exec_maps_its_exact_job_step_when_program_is_reused"
+        ],
+        "tests_run": 3,
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 0.669,
+        "log_sha256": "29acae0820d0872340e14aaaea128cba219473e4880eefe172deccbebc82644e"
+      },
+      {
+        "iteration": 21,
+        "focus": "SME workbook identity and complete context",
+        "tests": [
+          "test_review_integrity.ReviewIntegrityTests"
+        ],
+        "tests_run": 12,
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 2.81,
+        "log_sha256": "4e0c90a4f821b12156eb5600e48f47c7a78a7c8c530d9d6f95607e0fac5bb39d"
+      },
+      {
+        "iteration": 22,
+        "focus": "Single human return and deterministic agent continuation",
+        "tests": [
+          "test_workflow",
+          "test_runner"
+        ],
+        "tests_run": 14,
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 11.258,
+        "log_sha256": "455a8ff9a1f84c31e64c815bf4b3fa1571a9129efcd9ca372796e13a45b14175"
+      },
+      {
+        "iteration": 23,
+        "focus": "Crash recovery, controls and retry limits",
+        "tests": [
+          "test_recovery"
+        ],
+        "tests_run": 26,
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 11.534,
+        "log_sha256": "acd9c7417c123826cbeb15294f252e309e5fbede533ad33aa9e76608a1aad268"
+      },
+      {
+        "iteration": 24,
+        "focus": "Full source coverage and revoked conversion credit",
+        "tests": [
+          "test_coverage"
+        ],
+        "tests_run": 17,
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 6.919,
+        "log_sha256": "09d112158356c9a9746b251a7634e1bf70dd2dcca7830060f9328ded76f64497"
+      },
+      {
+        "iteration": 25,
+        "focus": "Target SQLite evidence and cancelled execution",
+        "tests": [
+          "test_coverage.CoverageTests.test_frozen_target_database_tampering_cannot_receive_credit",
+          "test_coverage.CoverageTests.test_cancelled_accountability_never_executes_targets"
+        ],
+        "tests_run": 2,
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 0.865,
+        "log_sha256": "a0673cae5a72d2884a7360677c4fa87f4496d2f3c7e9f0d5d2db1a5a89bb4959"
+      },
+      {
+        "iteration": 26,
+        "focus": "MCP protocol, sessions and paginated discovery",
+        "tests": [
+          "test_connectors.MCPProtocolTests",
+          "test_connectors.DiscoveryTests"
+        ],
+        "tests_run": 10,
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 2.644,
+        "log_sha256": "45063c2216f04db6efbf81859a9f07d6c62f1d82e71f3e8b9fc96612812738f9"
+      },
+      {
+        "iteration": 27,
+        "focus": "Read-only gateway and SQL boundaries",
+        "tests": [
+          "test_connectors.GatewayTests",
+          "test_integrations.IntegrationTests.test_catalog_queries_are_read_only_and_bound_identifiers",
+          "test_integrations.IntegrationTests.test_zowe_rejects_injected_dataset_and_write_command"
+        ],
+        "tests_run": 6,
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 1.619,
+        "log_sha256": "3154a8e80fd8581b00513f57646b1083d9a3a8f36f07ca9864f52d4d9ec01bfa"
+      },
+      {
+        "iteration": 28,
+        "focus": "LLM consent, usage and suggestion authority",
+        "tests": [
+          "test_integrations.IntegrationTests.test_provider_requires_egress_permission_and_records_actual_usage",
+          "test_knowledge_workflow.KnowledgeWorkflowTests.test_optional_provider_receives_bounded_frozen_classification_context"
+        ],
+        "tests_run": 2,
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 0.814,
+        "log_sha256": "2293236b3756b596a701c4a0b2263cfcd169a6dcdf8068417317f5b7827375f0"
+      },
+      {
+        "iteration": 29,
+        "focus": "Metrics, scope, report acceptance and PPT",
+        "tests": [
+          "test_portfolio_scope",
+          "test_reports"
+        ],
+        "tests_run": 11,
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 4.775,
+        "log_sha256": "115bab191e87b96948c4c44591ac2333c4de2f5fe2bb0167fe23fae19d02fc00"
+      },
+      {
+        "iteration": 30,
+        "focus": "Production HTTP workflow and visible UI contracts",
+        "tests": [
+          "test_http",
+          "test_api",
+          "test_knowledge_api"
+        ],
+        "tests_run": 9,
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 11.583,
+        "log_sha256": "d67f2f61279a35512ad793b227159d5a25d917ba5650c72387028409304d2c02"
+      }
+    ],
+    "iterations_completed": 30,
+    "passed": 29,
+    "failed": 1,
+    "test_executions": 243,
+    "limitations": [
+      "Local fictional fixtures; live source/provider connections not exercised",
+      "Unsupported native semantics remain blocked",
+      "Finite tests cannot prove zero defects or universal equivalence"
+    ]
+  },
+  "final_sweep": {
+    "schema_version": 1,
+    "created": "2026-10-03T16:20:55.815619+00:00",
+    "method": "Thirty distinct focused regression/adversarial passes; some gates deliberately overlap. This is not thirty complete-suite runs or an exhaustive proof.",
+    "source_fingerprint": "8ef330f1c9cee93f6030c6f9678dfe6dd59316158d9803b0d087da8993abfe59",
+    "source_unchanged_during_review": true,
+    "iterations": [
+      {
+        "iteration": 1,
+        "focus": "Setup installation failures",
+        "tests": [
+          "test_review_integrity.SetupScriptTests"
+        ],
+        "tests_run": 6,
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 0.22,
+        "log_sha256": "6eb0f4b80ce3cee3893f22b442bb5d1cb7576d7a4638254d79b28124ee3a3a29"
+      },
+      {
+        "iteration": 2,
+        "focus": "Manifest row loss and identity collisions",
+        "tests": [
+          "test_intake_hardening"
+        ],
+        "tests_run": 11,
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 0.134,
+        "log_sha256": "eccfc56e66cba344a0e4a98bb2ac5cb115e6518a4ca79f83a76b444b9eed5405"
+      },
+      {
+        "iteration": 3,
+        "focus": "Forged Excel dimensions and hidden scope",
+        "tests": [
+          "test_iteration_regressions"
+        ],
+        "tests_run": 6,
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 0.147,
+        "log_sha256": "3de332cc4a498515cb6015926de9167f4bb19b8df4b3d4a7fbfa4fac978abea4"
+      },
+      {
+        "iteration": 4,
+        "focus": "Portable paths and enforced folder ownership",
+        "tests": [
+          "test_layout",
+          "test_foundation"
+        ],
+        "tests_run": 17,
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 0.639,
+        "log_sha256": "aef94e49dfc0fc97db379cc7b10b545b46d867420aa8d2b0fcdcd357c507ca81"
+      },
+      {
+        "iteration": 5,
+        "focus": "Offline preflight and resource bounds",
+        "tests": [
+          "test_preflight"
+        ],
+        "tests_run": 22,
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 1.355,
+        "log_sha256": "2b6e4123a58aab386fc92bf667445fda20e61fe2b01646fbf8b45bbe1f32076f"
+      },
+      {
+        "iteration": 6,
+        "focus": "Complete export and selected inventory",
+        "tests": [
+          "test_adversarial.AdversarialTests.test_all_export_paths_survive_asset_selection",
+          "test_coverage.CoverageTests.test_inventory_preserves_every_original_line_and_explicit_scope"
+        ],
+        "tests_run": 2,
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 0.61,
+        "log_sha256": "cc00df029828cec86d135c1bf8b57793a047768e2c312a019d83f0842a045b30"
+      },
+      {
+        "iteration": 7,
+        "focus": "Structural mainframe file classification",
+        "tests": [
+          "test_source_classification"
+        ],
+        "tests_run": 14,
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 0.252,
+        "log_sha256": "809f5cd7d8e82eacbbfa89cb007a85cffb1777cb1494ebb175c087f103385a26"
+      },
+      {
+        "iteration": 8,
+        "focus": "Knowledge provenance and immutable snapshots",
+        "tests": [
+          "test_knowledge_workflow"
+        ],
+        "tests_run": 7,
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 0.412,
+        "log_sha256": "e971cb22fca1eb2110166f4ed669d741727fbbbc547853949e8b4808d3d13143"
+      },
+      {
+        "iteration": 9,
+        "focus": "COPY closure and ambiguity",
+        "tests": [
+          "test_source.SourceTests.test_copybook_source_hash_and_rule_evidence",
+          "test_adversarial.AdversarialTests.test_ambiguous_copy_candidates_stay_in_selected_accounting",
+          "test_source_classification.ClassifiedSourceTests.test_duplicate_extensionless_copybooks_do_not_choose_first_match"
+        ],
+        "tests_run": 3,
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 0.158,
+        "log_sha256": "111671cbe68cca9189478869d770c223921a7064cdb9450fc9eff854d1b50017"
+      },
+      {
+        "iteration": 10,
+        "focus": "JCL grammar and ordered source reconciliation",
+        "tests": [
+          "test_source.SourceTests.test_unsupported_jcl_options_and_manifest_disagreement_block",
+          "test_adversarial.AdversarialTests.test_dd_requires_io_adapter",
+          "test_adversarial.AdversarialTests.test_duplicate_jcl_job_declarations_are_not_merged"
+        ],
+        "tests_run": 3,
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 0.159,
+        "log_sha256": "b9b955e13f5eb3c2e3f465270afe041cdc6718735c2e3360eb26f1f7840795ee"
+      },
+      {
+        "iteration": 11,
+        "focus": "Standard and custom utility contracts",
+        "tests": [
+          "test_mainframe"
+        ],
+        "tests_run": 15,
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 0.132,
+        "log_sha256": "6ba04d45b1bde174beead8ca3f59270ee3278327c9700c5e83159b9816783e12"
+      },
+      {
+        "iteration": 12,
+        "focus": "COBOL storage and division lifetime",
+        "tests": [
+          "test_adversarial.AdversarialTests.test_working_storage_is_not_treated_as_caller_record",
+          "test_adversarial.AdversarialTests.test_missing_divisions_and_duplicate_groups_block"
+        ],
+        "tests_run": 2,
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 0.161,
+        "log_sha256": "b2f99a0fd9853dd85a658f64da9bc639ca2d89608ae2c4f1e29869181cb001d7"
+      },
+      {
+        "iteration": 13,
+        "focus": "Statement boundaries and unsupported syntax",
+        "tests": [
+          "test_adversarial.AdversarialTests.test_sentence_period_cannot_end_if_scope_silently",
+          "test_adversarial.AdversarialTests.test_malformed_move_literal_is_not_swallowed",
+          "test_source.SourceTests.test_unknown_statement_blocks_without_losing_source_lines",
+          "test_source.SourceTests.test_missing_copybook_and_nested_if_are_accounted"
+        ],
+        "tests_run": 4,
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 0.163,
+        "log_sha256": "4d67f4169cfa63ca107f1ea5b008e8a3b21a27b55d9942a118bd326b980a1548"
+      },
+      {
+        "iteration": 14,
+        "focus": "Numeric limits and fixed-width string semantics",
+        "tests": [
+          "test_source.SourceTests.test_string_field_ordering_and_out_of_range_initializers_block",
+          "test_source.SourceTests.test_cobol_string_comparisons_pad_literal_and_free_indentation",
+          "test_adversarial.AdversarialTests.test_lowercase_numeric_picture",
+          "test_adversarial.AdversarialTests.test_comment_marker_inside_literal"
+        ],
+        "tests_run": 4,
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 0.184,
+        "log_sha256": "88f8368b24c6e6c08e4ded682b6314c1f9522f459781e9be4064e7515c85a7f4"
+      },
+      {
+        "iteration": 15,
+        "focus": "Decision precedence and sequential effects",
+        "tests": [
+          "test_adversarial.AdversarialTests.test_and_precedes_or_and_quoted_literals_stay_case_sensitive",
+          "test_source.SourceTests.test_source_threshold_else_and_sequential_effect"
+        ],
+        "tests_run": 2,
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 0.156,
+        "log_sha256": "067d731036316da3c84e947b9bc43baf890f1fc99a24a05d960af97345c6758b"
+      },
+      {
+        "iteration": 16,
+        "focus": "Synthetic witnesses and case-budget gaps",
+        "tests": [
+          "test_adversarial.AdversarialTests.test_budget_exhaustion_explains_missing_boundary_obligations",
+          "test_source.SourceTests.test_boundary_witnesses_and_mutated_target_detected"
+        ],
+        "tests_run": 2,
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 0.17,
+        "log_sha256": "f29c1d55f93002533b7d53cc6321159b22cfd49cc66f512fa5f72f7abfe5d1db"
+      },
+      {
+        "iteration": 17,
+        "focus": "Independent expectations and forged oracles",
+        "tests": [
+          "test_adversarial.AdversarialTests.test_frozen_oracle_and_coverage_cannot_be_forged"
+        ],
+        "tests_run": 1,
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 0.152,
+        "log_sha256": "364be876f2cb6f74228ee7f7f0542efbf243305713a92578e1bf2efcb4b46b32"
+      },
+      {
+        "iteration": 18,
+        "focus": "Exported target input and executable capabilities",
+        "tests": [
+          "test_target_boundary",
+          "test_source.SourceTests.test_target_cannot_import_or_call_unknown_functions"
+        ],
+        "tests_run": 11,
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 0.279,
+        "log_sha256": "83534ec3d24cc59f4c665713230c565539f856fe36d2d30bca1f3f304e73e204"
+      },
+      {
+        "iteration": 19,
+        "focus": "Every-rule mutations and masked effects",
+        "tests": [
+          "test_adversarial.AdversarialTests.test_mutation_reports_masked_effect_without_false_credit",
+          "test_adversarial.AdversarialTests.test_adversarial_review_covers_each_rule_and_effect"
+        ],
+        "tests_run": 2,
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 0.227,
+        "log_sha256": "4588c22267884eee7a68f74a443d88be76f655286ae571be91d0de24b8c6c38b"
+      },
+      {
+        "iteration": 20,
+        "focus": "Job dispatch, record propagation and tampered templates",
+        "tests": [
+          "test_source.SourceTests.test_generated_jobs_propagate_record_to_next_step",
+          "test_adversarial.AdversarialTests.test_orchestration_rejects_modified_template_before_execution",
+          "test_coverage.CoverageTests.test_jcl_exec_maps_its_exact_job_step_when_program_is_reused"
+        ],
+        "tests_run": 3,
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 0.588,
+        "log_sha256": "3bde52f211a16459f532ebe5f6055fb2851b73368b9b1ec863d324159ef6ea9e"
+      },
+      {
+        "iteration": 21,
+        "focus": "SME workbook identity and complete context",
+        "tests": [
+          "test_review_integrity.ReviewIntegrityTests"
+        ],
+        "tests_run": 12,
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 2.733,
+        "log_sha256": "a9e4b7e98d3c83a4e479934e2a8a6450da0e49fb6e6418f9079db6b4eafed14f"
+      },
+      {
+        "iteration": 22,
+        "focus": "Single human return and deterministic agent continuation",
+        "tests": [
+          "test_workflow",
+          "test_runner"
+        ],
+        "tests_run": 14,
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 10.622,
+        "log_sha256": "05655181ab81f1fc5f5dc342aff1858ad0c3bfc46d5627fe885e8108000dc195"
+      },
+      {
+        "iteration": 23,
+        "focus": "Crash recovery, controls and retry limits",
+        "tests": [
+          "test_recovery"
+        ],
+        "tests_run": 26,
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 11.695,
+        "log_sha256": "1e3e4407a484ec5043867b89a302eae058680bf4c55cad42df28d17f3af188a2"
+      },
+      {
+        "iteration": 24,
+        "focus": "Full source coverage and revoked conversion credit",
+        "tests": [
+          "test_coverage"
+        ],
+        "tests_run": 17,
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 6.829,
+        "log_sha256": "62a2d8421d012b3544ca258c790c27b03b2b748344a2fc546d9dbd7f8c127340"
+      },
+      {
+        "iteration": 25,
+        "focus": "Target SQLite evidence and cancelled execution",
+        "tests": [
+          "test_coverage.CoverageTests.test_frozen_target_database_tampering_cannot_receive_credit",
+          "test_coverage.CoverageTests.test_cancelled_accountability_never_executes_targets"
+        ],
+        "tests_run": 2,
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 0.816,
+        "log_sha256": "82b13740e8e5b99eb7496f8a4fb035d136c40021bc432a067f242d45c1c0ad10"
+      },
+      {
+        "iteration": 26,
+        "focus": "MCP protocol, sessions and paginated discovery",
+        "tests": [
+          "test_connectors.MCPProtocolTests",
+          "test_connectors.DiscoveryTests"
+        ],
+        "tests_run": 10,
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 2.653,
+        "log_sha256": "6f1731edaa4cca7ec5e74a92b1dab74242ff1e3830e49fe7561e5fc852aef113"
+      },
+      {
+        "iteration": 27,
+        "focus": "Read-only gateway and SQL boundaries",
+        "tests": [
+          "test_connectors.GatewayTests",
+          "test_integrations.IntegrationTests.test_catalog_queries_are_read_only_and_bound_identifiers",
+          "test_integrations.IntegrationTests.test_zowe_rejects_injected_dataset_and_write_command"
+        ],
+        "tests_run": 6,
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 1.62,
+        "log_sha256": "3154a8e80fd8581b00513f57646b1083d9a3a8f36f07ca9864f52d4d9ec01bfa"
+      },
+      {
+        "iteration": 28,
+        "focus": "LLM consent, usage and suggestion authority",
+        "tests": [
+          "test_integrations.IntegrationTests.test_provider_requires_egress_permission_and_records_actual_usage",
+          "test_knowledge_workflow.KnowledgeWorkflowTests.test_optional_provider_receives_bounded_frozen_classification_context"
+        ],
+        "tests_run": 2,
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 0.809,
+        "log_sha256": "d56d84bacd08ad280fa31267d1f65645c812d97efac209ed7142f7f6181b9df3"
+      },
+      {
+        "iteration": 29,
+        "focus": "Metrics, scope, report acceptance and PPT",
+        "tests": [
+          "test_portfolio_scope",
+          "test_reports"
+        ],
+        "tests_run": 11,
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 4.852,
+        "log_sha256": "067ad42ff11267ae581c01f8e524d1076a6eb637a877fd123a47efd4fc16fce3"
+      },
+      {
+        "iteration": 30,
+        "focus": "Production HTTP workflow and visible UI contracts",
+        "tests": [
+          "test_http",
+          "test_api",
+          "test_knowledge_api"
+        ],
+        "tests_run": 9,
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 11.405,
+        "log_sha256": "aab50b19613b04668db3d4537348b96b3f6c8a36732c9b8631135b017f4a2769"
+      }
+    ],
+    "iterations_completed": 30,
+    "passed": 30,
+    "failed": 0,
+    "test_executions": 246,
+    "limitations": [
+      "Local fictional fixtures; live source/provider connections not exercised",
+      "Unsupported native semantics remain blocked",
+      "Finite tests cannot prove zero defects or universal equivalence"
+    ]
+  },
+  "reproduction_and_performance": {
+    "xml_guard_reproduction": [
+      {
+        "encoding": "utf-8",
+        "baseline": "rejected",
+        "fixed": "rejected"
+      },
+      {
+        "encoding": "utf-16",
+        "baseline": "accepted",
+        "fixed": "rejected"
+      },
+      {
+        "encoding": "utf-32",
+        "baseline": "accepted",
+        "fixed": "rejected"
+      }
+    ],
+    "fixed_source_accounting_benchmark": [
+      {
+        "comments": 1000,
+        "seconds": 0.002871,
+        "accounted_lines": 1020
+      },
+      {
+        "comments": 3000,
+        "seconds": 0.003004,
+        "accounted_lines": 3020
+      },
+      {
+        "comments": 6000,
+        "seconds": 0.006196,
+        "accounted_lines": 6020
+      }
+    ]
+  },
+  "findings": [
+    {
+      "id": "R30-01",
+      "issue": "Forged worksheet dimensions hide job rows or out-of-bound cells",
+      "reproduction": "Two regression tests failed before the actual-cell validation fix; normal two-job intake remains accepted",
+      "fix": "Bound and reconcile actual XML row/cell locations before reading intake",
+      "tests": [
+        "test_forged_intake_dimension_cannot_hide_job_rows",
+        "test_actual_intake_row_outside_declared_bounds_is_rejected",
+        "test_normal_two_job_intake_preserves_both_jobs"
+      ]
+    },
+    {
+      "id": "R30-02",
+      "issue": "Source accounting repeatedly splits the full program for every source line",
+      "reproduction": "Bounded split-count regression failed before fix; 6000-comment baseline measured 1.3823 seconds",
+      "fix": "Split original and normalized lines once, retain exact line accounting",
+      "tests": [
+        "test_source_accounting_does_not_resplit_the_program_per_line"
+      ]
+    },
+    {
+      "id": "R30-03",
+      "issue": "UTF-16/32 XML declarations bypass byte-level archive guard",
+      "reproduction": "Trusted baseline checked_zip accepted both encoded declarations; fixed guard rejects UTF-8/16/32",
+      "fix": "Normalize NUL-separated XML declaration bytes before existing reject checks",
+      "tests": [
+        "test_encoded_xml_declarations_are_rejected_before_parsing"
+      ]
+    },
+    {
+      "id": "R30-04",
+      "issue": "Malformed worksheet XML escapes the named intake validation boundary",
+      "reproduction": "Regression raised unhandled ParseError before wrapper fix",
+      "fix": "Convert known workbook parsing exceptions to actionable ValidationError",
+      "tests": [
+        "test_malformed_intake_xml_has_a_named_validation_error"
+      ]
+    }
+  ],
+  "final_acceptance": {
+    "full_suite": {
+      "tests": 248,
+      "seconds": 52.742,
+      "status": "PASS",
+      "log_sha256": "c4dd13b56b2d097abd2d94f99b12bd690a7ccd0b2096e93f0dd8c9a795986e91"
+    },
+    "typescript": "PASS",
+    "frontend_build": "PASS",
+    "layout": "PASS",
+    "diff_check": "PASS"
+  }
+}

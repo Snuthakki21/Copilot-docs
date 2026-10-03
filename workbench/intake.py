@@ -68,13 +68,44 @@ def parse_manifest(text):
 
 
 def parse_intake_xlsx(data):
-    from openpyxl import load_workbook
-    checked_zip(data).close()
-    book = load_workbook(BytesIO(data), read_only=True, data_only=False, keep_links=False)
+    from zipfile import BadZipFile
     try:
-        require('Intake' in book.sheetnames, 'Workbook needs an Intake sheet')
+        return _parse_intake_xlsx(data)
+    except ValidationError:
+        raise
+    except (SyntaxError, KeyError, TypeError, ValueError, BadZipFile, RuntimeError, NotImplementedError) as exc:
+        raise ValidationError('Invalid XLSX intake structure; use the supplied Intake template and repair malformed workbook XML') from exc
+
+
+def _parse_intake_xlsx(data):
+    from openpyxl import load_workbook
+    from xml.etree.ElementTree import fromstring
+    checked_zip(data).close()
+    # Validate actual cell locations before materializing a worksheet. Streaming
+    # readers trust declared dimensions, which can hide jobs or remote cells.
+    declared=load_workbook(BytesIO(data),read_only=True,data_only=False,keep_links=False)
+    try:
+        require('Intake' in declared.sheetnames,'Workbook needs an Intake sheet')
+        sheet=declared['Intake'];dimensions=(sheet.max_row,sheet.max_column)
+        require(all(type(n) is int for n in dimensions) and dimensions[0]<=205 and dimensions[1]<=8,'Intake worksheet dimensions are missing or exceed bounds')
+        with checked_zip(data) as archive:
+            xml=fromstring(archive.read(sheet._worksheet_path))
+        namespace='{http://schemas.openxmlformats.org/spreadsheetml/2006/main}'
+        seen=set();row_ids=set()
+        for row in xml.findall(namespace+'sheetData/'+namespace+'row'):
+            position=row.get('r','')
+            require(position.isdigit() and 1<=int(position)<=205 and position not in row_ids,'Actual intake row exceeds dimensions/bounds or is duplicated')
+            row_ids.add(position)
+            for cell in row.findall(namespace+'c'):
+                ref=cell.get('r','');match=re.fullmatch(r'([A-H])([1-9][0-9]{0,2})',ref)
+                require(match is not None and int(match[2])<=205 and match[2]==position and ref not in seen,'Actual intake cell exceeds dimensions/bounds or is duplicated')
+                seen.add(ref)
+                require(int(match[2])<=dimensions[0] and ord(match[1])-ord('A')+1<=dimensions[1],'Actual intake cells exceed the declared worksheet dimensions')
+    finally:declared.close()
+    book = load_workbook(BytesIO(data), read_only=False, data_only=False, keep_links=False)
+    try:
         ws = book['Intake']
-        require(ws.max_row <= 205 and ws.max_column <= 8, 'Workbook exceeds intake bounds')
+        require((ws.max_row,ws.max_column)==dimensions,'Declared and actual intake worksheet dimensions disagree')
         for row in ws:
             require(all(c.data_type != 'f' for c in row), 'Formulas are not accepted in intake')
         require([ws.cell(4,c).value for c in range(1,9)] == HEADERS, 'Intake headers changed')

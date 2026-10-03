@@ -45,3 +45,10 @@ return. Use the exact return inbox and explicit reviewer attribution documented
 in the prompt. Real tests and adversarial review must precede completion claims.
 Report unresolved gates honestly; never claim complete parity, zero bugs or
 unsupported success.
+
+For workbench implementation changes, reproduce defects before fixing them and
+run the focused regressions plus the complete suite. The reusable thirty-area
+review is `PYTHONPATH=. python tools/review_iterations.py`; its private logs stay
+under `.implementation/tmp/`. Read `docs/THIRTY_PASS_REVIEW.md` for its evidence
+and limits. This engineering review is separate from each process's existing
+conversion and adversarial gates; do not manufacture SME answers to run it.

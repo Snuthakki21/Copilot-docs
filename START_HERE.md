@@ -75,3 +75,6 @@ Each process has `input/`, `analysis/`, `review/`, `synthetic/`, `target/`, `rep
 Standalone generator: `PYTHONPATH=. python tools/synthetic_cases.py --source examples/Endeavor/ELIGIBLE.cbl --copybooks examples/Endeavor --output NEW_CASES.json`. UI development: Node 22+, `npm ci` in `frontend/`, then `npm run typecheck` and `npm run build`.
 
 [docs/MIGRATION_CONTRACT.md](docs/MIGRATION_CONTRACT.md) defines supported behavior, metrics and remaining adapters. [docs/MASTER_PROMPT.md](docs/MASTER_PROMPT.md) is the full extension/design contract, not a competing workflow. [VALIDATION.md](VALIDATION.md) records actual checks and residual limits.
+
+[docs/THIRTY_PASS_REVIEW.md](docs/THIRTY_PASS_REVIEW.md) records the 30-area
+adversarial review, reproduced fixes, repeatable checks and acceptance limits.

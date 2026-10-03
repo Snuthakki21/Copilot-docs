@@ -1,5 +1,14 @@
 # Validation evidence
 
+## Thirty-area review revision — 3 October 2026
+
+- **30 distinct adversarial review areas, two complete sweeps (60 pass executions)**: initial 29/30 areas passed; final **30/30 passed**, with **246 focused test executions** and an unchanged code fingerprint. Checks overlap and are not 30 full-suite runs.
+- Four reproduced findings closed: hidden Excel job rows/out-of-bounds cells, repeated whole-source splitting, UTF-16/32 XML declaration guard bypass, and unhandled malformed worksheet XML. Six new regression tests cover fixes and ordinary intake preservation.
+- Fresh full suite: **248 tests passed in 52.742 seconds**, including the production HTTP workflow, source accountability, target mutation checks, crash recovery, genuine-return quota and automatic PPT/report gates.
+- Frontend TypeScript check and bundle rebuild passed. Workspace layout and `git diff --check` passed. No frontend source or historical fixture evidence changed.
+- [docs/THIRTY_PASS_REVIEW.md](docs/THIRTY_PASS_REVIEW.md) provides the consolidated review; [docs/review-iterations.json](docs/review-iterations.json) preserves exact selectors, counts, results, timings, code fingerprints and log hashes.
+- Live connections and native workstation/browser/PowerPoint remain unverified; bounded conversion support and the limitations below remain in force. Passing finite local tests cannot establish a perfect, universally plug-and-play converter.
+
 ## Additional mainframe knowledge and setup revision — 3 October 2026
 
 - Full fresh regression: **242 tests passed in 55.031 seconds**, including the

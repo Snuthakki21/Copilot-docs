@@ -154,13 +154,13 @@ def sql_table_references(text):
 
 def analyze_program(path, text, files, classifications=None):
     source_hash=sha(text)
-    program_matches=[re.fullmatch(r'PROGRAM-ID\.\s*('+NAME+r')\.', line,re.I) for kind,line in normalized_lines(text) if kind=='code']
+    originals=text.splitlines();lines=normalized_lines(text)
+    program_matches=[re.fullmatch(r'PROGRAM-ID\.\s*('+NAME+r')\.', line,re.I) for kind,line in lines if kind=='code']
     program_matches=[m for m in program_matches if m]
     program_match=program_matches[0] if program_matches else None
     name=program_match.group(1).upper() if program_match else path.rsplit('/',1)[-1].split('.')[0].upper()
     p={'name':name,'path':path,'source_hash':source_hash,'id':sha('program:'+name+':'+source_hash),'kind':'cobol_program','fields':{},'rules':[], 'copybooks':[], 'dependencies':[], 'blockers':[], 'coverage':[], 'source_text':text, 'relationships':[]}
-    lines=normalized_lines(text)
-    for i,(kind,line) in enumerate(lines,1):p['coverage'].append({'line':i,'disposition':kind if kind in ('blank','comment') else 'unaccounted','source':line,'original':text.splitlines()[i-1]})
+    for i,(kind,line) in enumerate(lines,1):p['coverage'].append({'line':i,'disposition':kind if kind in ('blank','comment') else 'unaccounted','source':line,'original':originals[i-1]})
     procedure=False
     proc=[]
     group='INPUT';groups=set();division_order=[];section=None

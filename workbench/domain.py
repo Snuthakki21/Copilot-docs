@@ -95,7 +95,8 @@ def checked_zip(data):
             require(not x.filename.startswith(('/', '\\')) and '..' not in Path(x.filename).parts and '\\' not in x.filename, 'Unsafe archive path')
             require(x.file_size <= 8 * 1024 * 1024, 'Archive member exceeds limit')
             if x.filename.endswith('.xml'):
-                body = archive.read(x).upper()
+                # Detect declarations in UTF-16/32 as well as ordinary UTF-8.
+                body = archive.read(x).replace(b'\x00',b'').upper()
                 require(b'<!DOCTYPE' not in body and b'<!ENTITY' not in body, 'XML declarations/entities are not accepted')
         return archive
     except (zipfile.BadZipFile, OSError) as exc:

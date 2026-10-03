@@ -72,6 +72,7 @@ recorded 256-case-per-program budget or remain an explicit verification gap.
 
 | What can go wrong | Detection / treatment | Required action or remaining boundary |
 |---|---|---|
+| Excel declares a smaller range than its actual job rows, has duplicate/out-of-bounds cells or malformed XML | Intake checks actual worksheet cell locations against declared dimensions before reading job rows; malformed structure produces a named validation error | Repair the workbook using the supplied template. No hidden rows are silently discarded. XML entity/declaration checks also cover UTF-16/32. |
 | Wrong Python, missing package/wheel, broken UI bundle | Setup exits on failure; preflight checks runtime, dependencies and assets | Use the supported environment and locked installation. Do not ignore install errors. |
 | Full/read-only disk, unsuitable shared filesystem | Preflight checks access/capacity; writes fail explicitly and retain state | Use local disk with headroom and backups. Filesystem behavior, antivirus interference and sudden hardware failure cannot be certified by a permission check. |
 | Two workers, occupied port, browser opens early | Single-writer OS lock; optional port diagnostic; launch scripts check failures | Stop the other owner, then restart. Never delete the lock or ledger to bypass the check. |
