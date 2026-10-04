@@ -178,7 +178,8 @@ class ExpandedReportingTests(unittest.TestCase):
     def test_r825_program_scope_is_selected_membership_count(self):
         e=self.model({'source_programs':2,'target_python_programs':1,'portfolio_completed_processes':99})
         self.assertEqual((e['before_after'][0]['before'],e['before_after'][0]['after']),(2,1))
-        self.assertNotIn('99',self.rendered(e))
+        self.assertIn('<th scope="row">Programs</th><td>2</td><td>1</td>',self.rendered(e))
+        self.assertNotIn('<th scope="row">Programs</th><td>99</td>',self.rendered(e))
 
     def test_r826_counts_above_thousand_remain_exact_and_legible(self):
         e=self.model({'source_accounted_lines':12345,'source_in_scope_lines':12345,'source_applicable_lines':12345,'source_non_executable_lines':0,'source_verified_applicable_lines':12345})

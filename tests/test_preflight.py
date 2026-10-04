@@ -78,7 +78,9 @@ class PreflightTests(unittest.TestCase):
         self.assertEqual(result['status'], 'BLOCKED')
 
     def test_boundaries_are_checked_before_source_read(self):
-        (self.root / 'Endeavor/ELIGIBLE.cbl').write_bytes(b' ' * 512001)
+        from workbench.limits import MAX_SOURCE_FILE_BYTES
+        with (self.root / 'Endeavor/ELIGIBLE.cbl').open('wb') as source:
+            source.truncate(MAX_SOURCE_FILE_BYTES + 1)
         self.assertEqual(self.check(self.inspect(), 'source_export')['status'], 'BLOCKED')
 
     def test_physical_line_limit_rejects_newline_only_source_before_analysis(self):
@@ -174,7 +176,8 @@ class PreflightTests(unittest.TestCase):
 
     def test_source_and_file_count_limits(self):
         for index in range(200): (self.root / f'Endeavor/F{index}').write_text('A')
-        self.assertEqual(self.check(self.inspect(), 'source_export')['status'], 'BLOCKED')
+        with patch('workbench.preflight.MAX_SOURCE_FILES', 200):
+            self.assertEqual(self.check(self.inspect(), 'source_export')['status'], 'BLOCKED')
 
     def test_missing_zowe_command_and_invalid_egress_setting_block(self):
         with patch('workbench.preflight.shutil.which', return_value=None):

@@ -6,6 +6,8 @@ Credentials stay in WB_DB2_ODBC_CONNECTION. No arbitrary SQL endpoint exists.
 """
 import json
 import os
+import secrets
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import sys
@@ -14,9 +16,84 @@ from workbench.connectors import READ_TOOLS,MCP_VERSIONS,MAX_RESPONSE_BYTES,cata
 from workbench.domain import decode,encode,require,ValidationError
 
 
+def connection_string():
+    if os.environ.get('WB_DB2_CONFIG'):
+        from workbench.db2_setup import load_connection
+        return load_connection(os.environ['WB_DB2_CONFIG'],os.environ)
+    connection=os.environ.get('WB_DB2_ODBC_CONNECTION')
+    require(connection,'Configure a private read-only Db2 ODBC connection')
+    return connection
+
+
+class RowReadSessions:
+    """Short-lived read cursors; no SQL mutation or caller-supplied SQL exists."""
+    def __init__(self):self.sessions={};self.lock=threading.RLock()
+    def close(self,token):
+        with self.lock:
+            entry=self.sessions.pop(token,None)
+            if entry:
+                entry['timer'].cancel()
+                # Driver close failures must not print connection/credential text
+                # from a background expiry timer. Attempt both resources.
+                for resource in (entry['cursor'],entry['connection']):
+                    try:resource.close()
+                    except Exception:pass
+    def read(self,args):
+        import pyodbc
+        sql,params=catalog_sql('db2_read_table_rows',args)
+        with self.lock:
+            token=args.get('cursor');entry=self.sessions.get(token) if token else None
+            maximum=args.get('max_rows',1000);limit=args.get('limit',100)
+            if token:
+                require(entry is not None and entry['identity']==(args['schema'],args['table'],maximum),
+                        'Table read cursor expired or differs from its exact table/row budget')
+                if args.get('cancel'):
+                    self.close(token)
+                    return {'rows':[],'has_more':False,'next_cursor':None,'reason':'client_cancelled',
+                            'bounded':True,'read_only':True,'snapshot_consistent':False}
+            else:
+                require(len(self.sessions)<16,'Concurrent table read cursor budget reached')
+                if os.environ.get('WB_DB2_CONFIG'):
+                    from workbench.db2_setup import configured_max_rows
+                    require(maximum<=configured_max_rows(os.environ['WB_DB2_CONFIG']),
+                            'Table read exceeds the configured local row budget')
+                db=pyodbc.connect(connection_string(),autocommit=True,attrs_before={101:1},timeout=10)
+                try:
+                    cursor=db.cursor();cursor.timeout=15;cursor.execute(sql,*params)
+                    names=[column[0] for column in cursor.description]
+                    require(names and all(isinstance(name,str) for name in names) and len(names)==len(set(names)),
+                            'Invalid or duplicate database column names')
+                except Exception:
+                    db.close();raise
+                token=secrets.token_hex(32)
+                timer=threading.Timer(300,self.close,args=(token,));timer.daemon=True
+                entry={'connection':db,'cursor':cursor,'names':names,'read':0,'maximum':maximum,
+                       'identity':(args['schema'],args['table'],maximum),'timer':timer}
+                self.sessions[token]=entry;timer.start()
+            try:
+                count=min(limit,maximum-entry['read']);rows=entry['cursor'].fetchmany(count)
+                require(len(rows)<=count and all(len(row)==len(entry['names']) for row in rows),'Invalid table read row width/count')
+                records=[dict(zip(entry['names'],[value if value is None or type(value)in(str,int,float,bool) else str(value) for value in row])) for row in rows]
+                entry['read']+=len(records)
+                capped=entry['read']>=maximum;ended=len(records)<count
+                result={'rows':records,'has_more':not(capped or ended),'next_cursor':None if capped or ended else token,
+                        'reason':'row_budget' if capped else 'end_of_cursor' if ended else None,
+                        'rows_read':entry['read'],'max_rows':maximum,'bounded':True,'read_only':True,
+                        'snapshot_consistent':False,'coverage':'account_visible_cursor_read'}
+                require(len(encode(result))<=MAX_RESPONSE_BYTES-4096,'Table read page exceeds byte bound')
+                if capped or ended:self.close(token)
+                return result
+            except Exception:
+                self.close(token);raise
+
+
+ROW_READS=RowReadSessions()
+
+
 def execute(name,args):
+    if name=='db2_read_table_rows':return ROW_READS.read(args)
     import pyodbc
-    connection=os.environ.get('WB_DB2_ODBC_CONNECTION');require(connection,'Configure a private read-only Db2 ODBC connection')
+    connection=connection_string()
     sql,params=catalog_sql(name,args)
     with pyodbc.connect(connection,autocommit=True,attrs_before={101:1},timeout=10) as db:
         cursor=db.cursor();cursor.timeout=15;cursor.execute(sql,*params)
@@ -50,6 +127,11 @@ def tool_schema(name):
     else:
         properties.update(schema=text,table=text);required=['schema','table']
         if name=='db2_describe_table':properties['after_column']={'type':'integer','minimum':-1,'maximum':32767}
+        if name=='db2_read_table_rows':
+            properties['limit']={'type':'integer','minimum':1,'maximum':1000}
+            properties['max_rows']={'type':'integer','minimum':1,'maximum':500000}
+            properties['cursor']={'type':'string','pattern':'^[0-9a-f]{64}$'}
+            properties['cancel']={'type':'boolean'}
     return {'type':'object','properties':properties,'required':required,'additionalProperties':False}
 
 

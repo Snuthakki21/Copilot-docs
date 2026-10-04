@@ -115,3 +115,27 @@ Use the existing process workflow and its coverage gates. A knowledge entry neve
 turns missing source, unsupported semantics, unanswered review or failed tests
 into a successful conversion. Mainframe access remains read-only, including when
 investigating utilities whose normal purpose is to change data.
+
+## Application routing and source-derived fixtures
+
+WEDLX is a local/mounted input-availability location. Source-system files arrive
+at Tran Repository for WEDLX/downstream steps. Put exact folder/file bindings in
+`knowledge/input-locations.json` using [the template](../examples/input-locations.json).
+Do not invent datasets from location names. Availability does not establish
+layout, cutoff, completeness or business readiness.
+
+Terminal routing hints supplied by the user are `TS0 DB2 2` for copybook/Db2
+access, `SCHEDD` for development CA7 and UAT for CICS (exact location unconfirmed).
+`SYSPL` is a JCL search hint. Actual Zowe service/profile/library mappings or
+original exports are required; TPX session IDs are not API hosts. Record confirmed
+application details together in the existing catalog notes/utilities with
+provenance. Batch COBOL comes from Endeavor; JCL/PROCs may also be in actual
+mainframe libraries.
+
+Every applicable business/technical source logic item needs explicit validation.
+New Copilot-mode fixtures require 10–20 distinct valid source logic states,
+modeled outcomes/boundaries, invalid layouts and linked-group matching/mismatching
+keys. Freeze expectations from source before target execution. Unsupported
+numeric/file/Db2/CICS/utility semantics need reviewed adapters. Sample rows or
+generic mock data cannot certify them; surviving mutations and unreachable or
+undersampled obligations remain gaps.

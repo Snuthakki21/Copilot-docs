@@ -294,24 +294,30 @@ def analyze_program(path, text, files, classifications=None):
 
 
 def analyze_sources(files, manifest):
-    require(isinstance(files,dict) and len(files)<=200,'Source export exceeds file-count bound')
+    from .limits import MAX_SOURCE_FILES, MAX_SOURCE_FILE_BYTES
+    require(isinstance(files,dict) and len(files)<=MAX_SOURCE_FILES,'Source export exceeds file-count bound')
+    selected_scope=set(manifest.get('lineage_scope',files))
     # A missing snapshot is an intentional historical compatibility boundary:
     # old immutable reports must reproduce their original extension-based analysis.
     classifications=None;findings=[]
     if 'mainframe_knowledge' in manifest:
         from .mainframe import classify_files, utility_findings, validate_snapshot
         for path,text in files.items():
-            require(isinstance(text,str) and len(text)<=512000,'Source file too large')
+            require(isinstance(text,str) and len(text.encode('utf-8'))<=MAX_SOURCE_FILE_BYTES,'Source file too large')
         validate_snapshot(manifest['mainframe_knowledge'])
         classifications=classify_files(files,manifest,manifest['mainframe_knowledge'])
         findings=utility_findings(manifest,manifest['mainframe_knowledge'],files)
     programs={};assets=[];blockers=[]
     for path,text in sorted(files.items()):
-        require(isinstance(text,str) and len(text)<=512000,'Source file too large')
+        require(isinstance(text,str) and len(text.encode('utf-8'))<=MAX_SOURCE_FILE_BYTES,'Source file too large')
         lower=path.lower();stem=path.rsplit('/',1)[-1].rsplit('.',1)[0].upper();h=sha(text)
         classification=classifications[path] if classifications is not None else None
         classified_kind=classification['kind'] if classification is not None else None
         is_program=classified_kind=='cobol_program' if classification is not None else lower.endswith(('.cbl','.cob','.cobol'))
+        if is_program and path not in selected_scope:
+            lines=normalized_lines(text)
+            assets.append({'id':sha('cobol_program:'+path+':'+h),'kind':'cobol_program','name':stem,'path':path,'source_hash':h,'source_text':text,'loc':{'physical':len(lines),'code':sum(k not in ('blank','comment') for k,_ in lines)},'selected':False})
+            continue
         if is_program:
             p=analyze_program(path,text,files,classifications)
             if classification is not None:p['target_contract_version']=2
@@ -329,18 +335,19 @@ def analyze_sources(files, manifest):
                 else:
                     prefix={'jcl_job':'//*','sql':'--'}.get(kind)
                     asset['loc']['code']=sum(bool(x.strip()) and not (prefix and x.lstrip().startswith(prefix)) for x in text.splitlines())
-                if classified_kind in ('unknown','ambiguous') or classification.get('conflicts'):
+                if path in selected_scope and (classified_kind in ('unknown','ambiguous') or classification.get('conflicts')):
                     blockers.append({'kind':'source_classification','path':path,'message':'File classification is '+classified_kind+'; resolve the source type using original export metadata and content evidence before conversion. '+('; '.join(classification.get('conflicts',[])))})
-                elif kind in ('other_source','sql'):
+                elif path in selected_scope and kind in ('other_source','sql'):
                     blockers.append({'kind':'unsupported_source','path':path,'message':'Recognized '+classified_kind+' source requires a reviewed semantic adapter; recognizing its file type does not convert its behavior.'})
             if kind=='sql':
                 asset['tables']=sql_table_references(text) if classification is not None else sorted(set(re.findall(r'\b(?:FROM|JOIN|INTO|UPDATE|CREATE\s+TABLE)\s+([A-Z][A-Z0-9_.]*)',text,re.I)))
                 if classification is not None:asset['table_evidence_basis']='STATIC_UNQUOTED_REFERENCES_NOT_CATALOG_INVENTORY'
             if kind=='bms_map':
                 asset['screens']=re.findall(r'^(\w+)\s+DFHMDI\b',text,re.M|re.I)
-                blockers.append({'kind':'unsupported_source','message':'BMS/CICS behavior requires source-supported action mapping; no replacement screen is credited.','path':path})
+                if path in selected_scope:blockers.append({'kind':'unsupported_source','message':'BMS/CICS behavior requires source-supported action mapping; no replacement screen is credited.','path':path})
             assets.append(asset)
     for finding in findings:
+        if 'lineage_scope' in manifest and finding.get('source_refs') and not any(r.get('path') in selected_scope for r in finding['source_refs']):continue
         refs=finding.get('source_refs',[]);first_ref=refs[0] if refs else {}
         location=(finding['job']+'.'+finding['step']) if finding.get('job') and finding.get('step') else first_ref.get('path','source export')+(':'+str(first_ref['line']) if first_ref.get('line') else '')
         blocker={'kind':'unsupported_utility','message':'Utility '+finding['program']+' in '+location+' is recognized but has no verified executable adapter. '+finding.get('behavior','')+' Required evidence: '+('; '.join(finding.get('required_evidence',[]))), 'job':finding.get('job',''),'step':finding.get('step',''),'utility_id':finding['utility_id']}
@@ -361,6 +368,7 @@ def analyze_sources(files, manifest):
     # Validate the entire supported card grammar and reconcile source step order.
     jcl_job_origins={}
     for path,text in files.items():
+        if path not in selected_scope:continue
         if classifications is not None:
             if classifications[path]['kind']!='jcl_job':continue
         elif not path.lower().endswith('.jcl'):continue
@@ -385,11 +393,11 @@ def analyze_sources(files, manifest):
             if steps!=expected:blockers.append({'kind':'scope_mismatch','path':path,'message':'JCL job/step/program order differs from manifest: '+name})
             if job and any(s['condition'].upper() not in ('ALWAYS','') for s in job['steps']):blockers.append({'kind':'scope_mismatch','path':path,'message':'Manifest conditional steps are not evidenced by the supported unconditional JCL grammar: '+name})
     # Unreferenced programs are discovered but do not inflate the selected conversion scope.
-    scoped={n:p for n,p in programs.items() if n in used}
+    scoped={n:p for n,p in programs.items() if n in used or ('lineage_scope' in manifest and p['path'] in selected_scope)}
     selected_paths={p['path'] for p in scoped.values()} | {d['path'] for p in scoped.values() for d in p['dependencies']}
     for p in scoped.values():blockers+=p['blockers']
     for asset in assets:
-        asset['selected']=asset['path'] in selected_paths or asset['kind'] in ('jcl_job','bms_map','sql','other_source')
+        asset['selected']=asset['path'] in selected_scope if 'lineage_scope' in manifest else asset['path'] in selected_paths or asset['kind'] in ('jcl_job','bms_map','sql','other_source')
         asset['scope_disposition']='selected' if asset['selected'] else 'out_of_scope'
         asset['scope_reason']='Selected manifest program, resolved dependency, or additional process export requiring accountability' if asset['selected'] else 'Not called by the selected manifest and not a resolved COPY dependency'
     scoped_assets=assets

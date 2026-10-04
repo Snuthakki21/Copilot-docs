@@ -42,7 +42,7 @@ substitute agent reasoning for reviewer approval.
 2. Execute:
 
    ```sh
-   python -m workbench.runner run --manifest MANIFEST --workspace WORKSPACE
+   python -m workbench.runner run --manifest MANIFEST --workspace WORKSPACE --assistant copilot_chat
    ```
 
    `start` is an alias of `run`. Intake reads `WORKSPACE/Endeavor/` automatically.
@@ -53,8 +53,24 @@ substitute agent reasoning for reviewer approval.
    baseline from mutable files during Resume.
    Changed input requires an explicitly selected new process ID. Start does
    not resume a paused or failed process; inspect and use `resume` explicitly.
-3. The command runs managed analysis, emits the single packet and normally
-   exits with `WAITING_SME`. Deliver the returned `packet` paths, including
+3. First map job/PROC/program/COPY/include/dataset/Db2/CICS/scheduler/interface
+   dependencies. Retain and index the entire export; select conversion scope by
+   transitive evidence. Resolve locally first, then use configured typed
+   read-only Zowe/Db2 lookup. `WAITING_DISCOVERY` means a missing, ambiguous or
+   dynamic binding must be resolved before conversion or questions. Never invent
+   dataset names or turn an unknown count into zero. WEDLX/Tran Repository folder
+   bindings belong in `knowledge/input-locations.json`. TPX session names are
+   routing hints and require actual service/profile mappings.
+   With the UI running, use the workspace MCP bridge rather than a second writer.
+   `workbench_next_task`, `workbench_lineage` and `workbench_source_excerpt` provide
+   frozen tasks and bounded evidence. No LLM endpoint/token is required. Address
+   adapter obligations using normal repository coding tools and meaningful tests.
+   Submit structured context with `workbench_submit_analysis`; it validates
+   structure/lineage, not conversion correctness. Preserve unsupported semantics.
+   Adapter changes require evidence-consistent new analysis; never rewrite frozen
+   artifacts or clear blockers by changing flags. Copilot tokens/billing remain
+   Unknown without an actual usage receipt.
+   The single packet is then issued at `WAITING_SME`. Deliver its paths, including
    `sme-checklist.xlsx`, to the user. Explain any source blockers and the
    source-derived evidence boundary. Preserve the packet's Context, IDs,
    questions and fingerprint. Ask the human to complete that one workbook and
@@ -109,6 +125,15 @@ substitute agent reasoning for reviewer approval.
    Run real regression tests for any engine changes and perform an adversarial
    review before claiming completion. Inspect unmet gates rather than relying
    on a green label alone. Preserve failed and blocked evidence.
+   Validate every business and technical source logic obligation. Require 10–20
+   distinct source-valid records per applicable supported logic item, every
+   decision outcome, boundaries, sequential effects, errors and invalid layouts.
+   Related files/tables use consistent referral/product/key values and explicit
+   unmatched/duplicate/missing/empty cases where source-supported adapters exist.
+   Generate expectations from source rules before executing Python; compare full
+   outputs, traces and return codes, then perform adversarial review. Unsupported
+   logic gets no fabricated expectations or verification credit. Keep complete
+   source/target/test/reason mappings in coverage artifacts, not per-rule Markdown.
 7. Use the diagnostic/continuation commands as needed:
 
    ```sh

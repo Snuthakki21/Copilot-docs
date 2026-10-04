@@ -4,7 +4,7 @@ import ast
 import copy
 import random
 from .domain import encode, sha, require
-from .reference import run_reference, input_errors
+from .reference import run_reference, input_errors, predicate
 from .target import run_generated, prepare_generated, rule_nodes, layout_nodes
 
 
@@ -13,8 +13,18 @@ def comparisons(node):
     return comparisons(node['left'])+comparisons(node['right']) if node['op'] in ('AND','OR') else [node]
 
 
-def plan_cases(program, seed=21, budget=256):
-    require(type(budget) is int and 1<=budget<=256,'Case budget must be between 1 and 256')
+def plan_cases(program, seed=21, budget=256, min_records_per_logic=0):
+    """Preserve historical suites; explicit new-intake opt-in enables v3 multiplicity."""
+    require(min_records_per_logic is None or type(min_records_per_logic) is int and
+            (min_records_per_logic == 0 or 10 <= min_records_per_logic <= 20),
+            'Minimum distinct records per logic must be zero (historical) or 10 to 20')
+    if min_records_per_logic:
+        return _plan_cases_v3(program, seed, budget, min_records_per_logic)
+    return _plan_cases_legacy(program, seed, budget)
+
+
+def _plan_cases_legacy(program, seed=21, budget=256, max_budget=256):
+    require(type(budget) is int and 1<=budget<=max_budget,'Case budget must be between 1 and '+str(max_budget))
     if program.get('target_contract_version') == 2:
         # Ledger JSON canonicalization must not alter the frozen case order.
         program={**program,'fields':dict(sorted(program['fields'].items()))}
@@ -92,8 +102,174 @@ def plan_cases(program, seed=21, budget=256):
     return {'version':1,'program':program['name'],'source_hash':program['source_hash'],'seed':seed,'evidence_basis':'SOURCE_DERIVED_EXPECTED','generator_version':'source-subset-2' if program.get('target_contract_version') == 2 else 'source-subset-1','cases':cases,'coverage':coverage,'contract_hash':sha(encode(contract))}
 
 
+def _logic_fields(node):
+    if not isinstance(node,dict):return set()
+    if 'field' in node:return {node['field']}
+    return _logic_fields(node['left']) | _logic_fields(node['right'])
+
+
+def _logic_inputs(program,record):
+    """Observe source predicate inputs after all preceding source MOVE effects."""
+    if input_errors(program,record):return {}
+    state=record.copy();inputs={}
+    for rule in program['rules']:
+        inputs[rule['id']]={name:state[name] for name in sorted(_logic_fields(rule['predicate']))}
+        arm=rule['then'] if predicate(rule['predicate'],state) else rule['else']
+        for effect in arm:state[effect['field']]=effect['value']
+    return inputs
+
+
+def _domain_options(spec,minimum,seed):
+    values=[spec['default']]
+    if spec['type']=='integer':
+        values += [0,spec['max']] + list(range(min(spec['max']+1,minimum*2)))
+        rng=random.Random(seed)
+        values += [rng.randrange(spec['max']+1) for _ in range(minimum*2)]
+    else:
+        values += [' '*spec['width']]
+        alphabet='0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
+        values += [letter.ljust(spec['width']) for letter in alphabet[:minimum*2]]
+    return list(dict.fromkeys(values))
+
+
+def _plan_cases_v3(program,seed,budget,minimum):
+    require(type(budget) is int and 1<=budget<=10000,'V3 case budget must be between 1 and 10000')
+    # Regenerate the historical source boundaries/strict negatives, then add
+    # distinct source-relevant values. Nothing rewrites a frozen v1/v2 suite.
+    baseline=_plan_cases_legacy(program,seed,min(10000,max(256,budget*4)),max_budget=10000)
+    program={**program,'fields':dict(sorted(program['fields'].items()))}
+    base={name:spec['default'] for name,spec in program['fields'].items()}
+    candidates={};mandatory=set()
+    def add(record,reason,required=False):
+        key=sha(encode(record))
+        if required:mandatory.add(key)
+        if key in candidates:return
+        expected=run_reference(program,record);groups={}
+        if isinstance(record,dict):
+            for name,value in record.items():
+                if name in program['fields']:groups.setdefault(program['fields'][name]['group'],{})[name]=value
+        logic_inputs=_logic_inputs(program,record)
+        correlations=[]
+        if not input_errors(program,record):
+            for relationship in program.get('relationships',[]):
+                left,right=relationship['left'],relationship['right']
+                if program['fields'][left]['group']==program['fields'][right]['group']:continue
+                correlations.append({'left':left,'right':right,
+                                     'left_group':program['fields'][left]['group'],
+                                     'right_group':program['fields'][right]['group'],
+                                     'left_value':record[left],'right_value':record[right],
+                                     'status':'MATCH' if record[left]==record[right] else 'INTENTIONAL_MISMATCH',
+                                     'source_refs':list(relationship.get('source_refs',[]))})
+        candidates[key]={'reason':reason,'record':record,'files':{group:[row] for group,row in groups.items()},
+                         'expected':expected,'intentional_invalid':expected['input_status']=='REJECT_INPUT',
+                         'logic_inputs':logic_inputs,
+                         'logic_input_hashes':{rid:sha(encode(values)) for rid,values in logic_inputs.items()},
+                         'correlations':correlations}
+    for case in baseline['cases']:
+        add(case['record'],case['reason'],case['reason']!='Source-predicate interaction witness')
+    domains={name:_domain_options(spec,minimum,seed) for name,spec in program['fields'].items()}
+    all_fields=sorted(set().union(*(_logic_fields(rule['predicate']) for rule in program['rules']))) if program['rules'] else []
+    for name in all_fields:
+        for value in domains[name]:
+            if len(candidates)>=10000:break
+            add({**base,name:value},'Distinct source predicate input: '+name)
+    for rule in program['rules']:
+        for comparison in comparisons(rule['predicate']):
+            left,right=comparison['left'],comparison['right']
+            if not (isinstance(left,dict) and 'field' in left and isinstance(right,dict) and 'field' in right):continue
+            a,b=left['field'],right['field']
+            common=[value for value in domains[a] if value in domains[b]]
+            for index,value in enumerate(common):
+                if len(candidates)>=10000:break
+                add({**base,a:value,b:value},'Correlated source key/value equality: '+a+' / '+b)
+                alternatives=[other for other in domains[b] if other!=value]
+                if alternatives:
+                    add({**base,a:value,b:alternatives[index%len(alternatives)]},'Intentional source key/value mismatch: '+a+' / '+b)
+    rules={rule['id']:{'true':[],'false':[]} for rule in program['rules']}
+    counts={rid:set() for rid in rules};observed=set();selected=set();cases=[]
+    def select(key):
+        if key in selected or len(cases)>=budget:return
+        case=copy.deepcopy(candidates[key]);case['id']=f'case_{len(cases):04d}'
+        cases.append(case);selected.add(key)
+        for rid,fingerprint in case['logic_input_hashes'].items():counts[rid].add(fingerprint)
+        for trace in case['expected'].get('trace',[]):
+            observed.add((trace['rule_id'],trace['branch']))
+            rules[trace['rule_id']]['true' if trace['branch'] else 'false'].append(case['id'])
+    # Every branch and each distinct logic signature gets priority over bulk
+    # interactions. Mandatory invalid/layout obligations remain explicit.
+    for key,case in candidates.items():
+        if any((trace['rule_id'],trace['branch']) not in observed for trace in case['expected'].get('trace',[])):select(key)
+    for key,case in candidates.items():
+        if any(len(counts[rid])<minimum and fingerprint not in counts[rid]
+               for rid,fingerprint in case['logic_input_hashes'].items()):select(key)
+    for key in candidates:
+        if key in mandatory:select(key)
+    for key in candidates:select(key)
+    gaps=[{'rule_id':rid,'branch':branch,'status':'unknown_or_unprovable',
+           'reason':'No source-derived witness; the branch may be unreachable or need a reviewed semantic adapter. No verification credit.'}
+          for rid,branches in rules.items() for branch,witnesses in branches.items() if not witnesses]
+    record_gaps=[]
+    for rid,fingerprints in counts.items():
+        if len(fingerprints)>=minimum:continue
+        fields=sorted(_logic_fields(next(rule['predicate'] for rule in program['rules'] if rule['id']==rid)))
+        finite_domain=1
+        for name in fields:
+            spec=program['fields'][name]
+            if spec['type']!='integer':finite_domain=None;break
+            finite_domain *= spec['max']+1
+            if finite_domain>=minimum:break
+        available={case['logic_input_hashes'][rid] for case in candidates.values() if rid in case['logic_input_hashes']}
+        limited=finite_domain is not None and finite_domain<minimum
+        status='limited_input_domain' if limited else 'budget_exhausted' if len(available)>=minimum else 'bounded_generation_exhausted'
+        record_gaps.append({'rule_id':rid,'required':minimum,'observed':len(fingerprints),
+                            'status':status,'multiplicity_applicable':not limited,
+                            'proven_input_domain_size':finite_domain if limited else None,
+                            'reason':'The source predicate has fewer distinct valid input states than the requested minimum; duplicate or unused-field padding cannot count. Review the multiplicity exception explicitly.' if limited else 'The configured budget omitted available distinct source logic records.' if status=='budget_exhausted' else 'Bounded generation cannot prove the required distinct executed logic states; prior assignments or unreachable logic may constrain them. Retain the gap.'})
+    obligation_gaps=list(baseline['coverage']['obligation_gaps'])
+    obligation_gaps += [{'record_hash':key,'reason':case['reason'],'status':'budget_exhausted',
+                         'explanation':'Required source boundary or intentional input-negative case omitted; no verification credit.'}
+                        for key,case in candidates.items() if key in mandatory and key not in selected]
+    correlation_validation=[];correlation_gaps=[]
+    for relationship in program.get('relationships',[]):
+        left,right=relationship['left'],relationship['right']
+        if program['fields'][left]['group']==program['fields'][right]['group']:continue
+        rows=[correlation for case in cases for correlation in case['correlations']
+              if correlation['left']==left and correlation['right']==right]
+        result={'left':left,'right':right,'matched_records':sum(row['status']=='MATCH' for row in rows),
+                'mismatched_records':sum(row['status']=='INTENTIONAL_MISMATCH' for row in rows),
+                'basis':'SOURCE_LAYOUT_GROUP_PROJECTIONS_NOT_DATASET_IO_PARITY'}
+        correlation_validation.append(result)
+        if not result['matched_records'] or not result['mismatched_records']:
+            correlation_gaps.append({**result,'status':'linked_key_witness_missing',
+                                     'reason':'Both valid matching keys and intentional mismatches are required before linked-record credit.'})
+    coverage={'rule_count':len(rules),'branch_targets':len(rules)*2,
+              'branches_observed':sum(bool(value) for branches in rules.values() for value in branches.values()),
+              'rules':rules,'gaps':gaps,'obligation_gaps':obligation_gaps,'budget':budget,
+              'mandatory_candidates':len(mandatory),'min_records_per_logic':minimum,
+              'record_counts':{rid:len(values) for rid,values in counts.items()},
+              'record_hashes':{rid:sorted(values) for rid,values in counts.items()},
+              'logic_fields':{rule['id']:sorted(_logic_fields(rule['predicate'])) for rule in program['rules']},
+              'record_count_gaps':record_gaps,'correlation_validation':correlation_validation,
+              'correlation_gaps':correlation_gaps,
+              'complete':not gaps and not obligation_gaps and not record_gaps and not correlation_gaps and not program['blockers'],
+              'exhaustive':False,
+              'claim':'At least the configured distinct valid source predicate input states per applicable supported logic, with source boundaries, input negatives and linked layout-group keys. Missing/duplicate/empty dataset I/O semantics require their own reviewed adapter; no observed legacy parity.'}
+    coverage['logic_validation']={'contract_version':3,'minimum_distinct_records_per_logic':minimum,
+                                  'applicable_logic_count':len(rules),'logic_meeting_minimum':sum(len(values)>=minimum for values in counts.values()),
+                                  'distinct_logic_records':sum(len(values) for values in counts.values()),
+                                  'gaps':len(record_gaps),'complete':not record_gaps and not program['blockers'],
+                                  'distinctness_basis':'SOURCE_PREDICATE_INPUT_STATE_AT_EXECUTION; unused fields and duplicate records do not count',
+                                  'records_per_logic':coverage['record_counts']}
+    contract={'source':program.get('semantic_hash',program['source_hash']),'seed':seed,
+              'rules':program['rules'],'fields':program['fields'],'target_contract_version':program.get('target_contract_version',1),
+              'fixture_contract_version':3,'min_records_per_logic':minimum,'budget':budget}
+    return {'version':3,'program':program['name'],'source_hash':program['source_hash'],'seed':seed,
+            'evidence_basis':'SOURCE_DERIVED_EXPECTED','generator_version':'source-subset-3',
+            'cases':cases,'coverage':coverage,'contract_hash':sha(encode(contract))}
+
+
 def verify_program(program,code,suite,checkpoint=None):
-    require(encode(suite)==encode(plan_cases(program,suite['seed'],suite['coverage']['budget'])), 'Frozen suite or coverage differs from the deterministic source-derived contract')
+    require(encode(suite)==encode(plan_cases(program,suite['seed'],suite['coverage']['budget'],suite['coverage'].get('min_records_per_logic',0))), 'Frozen suite or coverage differs from the deterministic source-derived contract')
     return _verify_cases(program,code,suite,checkpoint)
 
 
@@ -134,7 +310,7 @@ def adversarial_review(program, code, suite, checkpoint=None):
     and every literal assignment a different valid field value. A surviving
     mutation is an explicit gap (including effects overwritten downstream).
     """
-    require(encode(suite)==encode(plan_cases(program,suite['seed'],suite['coverage']['budget'])), 'Adversarial suite differs from frozen source contract')
+    require(encode(suite)==encode(plan_cases(program,suite['seed'],suite['coverage']['budget'],suite['coverage'].get('min_records_per_logic',0))), 'Adversarial suite differs from frozen source contract')
     tree=ast.parse(code);rules=rule_nodes(tree,program)
     require(len(rules)==len(program['rules']),'Target rule structure differs')
     mutations=[]

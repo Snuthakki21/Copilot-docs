@@ -12,7 +12,9 @@ import socket
 import sys
 import unicodedata
 
-from .domain import MAX_SOURCE_LINES, ValidationError, require, safe_path
+from .domain import MAX_UPLOAD, ValidationError, require, safe_path
+from .limits import (MAX_SOURCE_BYTES, MAX_SOURCE_ENTRIES, MAX_SOURCE_FILE_BYTES,
+                     MAX_SOURCE_FILES, MAX_SOURCE_LINES, source_line_count)
 from .layout import validate_workspace
 from .setup import deterministic_metrics
 
@@ -64,10 +66,24 @@ def _locked(path):
 def _read_sources(root):
     folder = safe_path(root, 'Endeavor')
     require(folder.is_dir(), 'Endeavor is missing; provide the complete UTF-8 text export')
-    files, portable, size, entries, lines = {}, {}, 0, 0, 0
-    for path in sorted(folder.rglob('*')):
-        entries += 1
-        require(entries <= 10000, 'Source directory traversal exceeds 10,000 entries; use a process-scoped export')
+    files, portable, size, lines = {}, {}, 0, 0
+    # Count entries before sorting, and never follow a directory symlink. A
+    # materialized rglob() could exhaust memory before its limit was checked.
+    pending, paths, entries = [folder], [], 0
+    while pending:
+        current = pending.pop()
+        if current != folder: safe_path(folder, current.relative_to(folder).as_posix())
+        require(current.is_dir() and not current.is_symlink(), 'Source directories must be regular directories without symlinks')
+        with os.scandir(current) as children:
+            for child in children:
+                entries += 1
+                require(entries <= MAX_SOURCE_ENTRIES,
+                        f'Source directory traversal exceeds {MAX_SOURCE_ENTRIES:,} entries; use a process-scoped export')
+                path = Path(child.path)
+                require(not child.is_symlink(), 'Source exports must not contain symlinks')
+                paths.append(path)
+                if child.is_dir(follow_symlinks=False): pending.append(path)
+    for path in sorted(paths):
         require(not path.is_symlink(), 'Source exports must not contain symlinks')
         relative = path.relative_to(folder).as_posix()
         safe_path(folder, relative)
@@ -76,16 +92,19 @@ def _read_sources(root):
         portable[key] = relative
         if path.is_dir(): continue
         require(path.is_file(), 'Source exports must contain only regular files and directories')
-        require(len(files) < 200 and path.stat().st_size <= 512000,
-                'Use at most 200 source files, each at most 512,000 bytes')
-        raw = path.read_bytes()
-        require(len(raw) <= 512000, 'Source file changed or exceeds 512,000 bytes')
+        require(len(files) < MAX_SOURCE_FILES, f'Source export exceeds the {MAX_SOURCE_FILES:,} file limit')
+        require(path.stat().st_size <= MAX_SOURCE_FILE_BYTES,
+                f'Source file exceeds the {MAX_SOURCE_FILE_BYTES:,} byte limit: ' + relative)
+        read_limit = min(MAX_SOURCE_FILE_BYTES, MAX_SOURCE_BYTES - size)
+        with path.open('rb') as source: raw = source.read(read_limit + 1)
+        require(len(raw) <= MAX_SOURCE_FILE_BYTES,
+                f'Source file changed or exceeds the {MAX_SOURCE_FILE_BYTES:,} byte limit: ' + relative)
         size += len(raw)
-        require(size <= 8 * 1024 * 1024, 'Source export exceeds the 8 MiB combined bound')
+        require(size <= MAX_SOURCE_BYTES, f'Source export exceeds the {MAX_SOURCE_BYTES:,} byte combined limit')
         try: text = raw.decode('utf-8')
         except UnicodeError as exc: raise ValidationError('Source export contains non-UTF-8 bytes; decode using the original CCSID before intake') from exc
         require('\x00' not in text, 'Source export contains NUL/binary content; export readable source separately from data/load modules')
-        lines += len(text.splitlines())
+        lines += source_line_count(text)
         require(lines <= MAX_SOURCE_LINES,
                 f'Source export exceeds the {MAX_SOURCE_LINES:,} combined physical-line limit; use a process-scoped export')
         files[relative] = text
@@ -98,9 +117,9 @@ def _manifest(path):
     path = Path(path).absolute()
     require(path.is_file() and not path.is_symlink() and not any(p.is_symlink() for p in path.parents),
             'Manifest must be a regular Markdown or XLSX file with no symlink parents')
-    limit = 8 * 1024 * 1024 if path.suffix.lower() == '.xlsx' else 128000
+    limit = MAX_UPLOAD if path.suffix.lower() == '.xlsx' else 128000
     require(path.stat().st_size <= limit, 'Intake file exceeds its size limit')
-    raw = path.read_bytes()
+    with path.open('rb') as manifest: raw = manifest.read(limit + 1)
     require(len(raw) <= limit, 'Intake file changed or exceeds its size limit')
     if path.suffix.lower() == '.xlsx':
         try: return parse_intake_xlsx(raw)
@@ -204,7 +223,8 @@ def inspect_workspace(workspace, manifest=None, *, port=None, environ=None, coor
             context = safe_path(root, 'knowledge/inbox/context.md')
             if context.exists():
                 require(context.is_file() and context.stat().st_size <= 16000, 'Background context must be a regular UTF-8 Markdown file of at most 16,000 bytes')
-                raw = context.read_bytes(); require(len(raw) <= 16000, 'Background context exceeds 16,000 bytes'); raw.decode('utf-8')
+                with context.open('rb') as background: raw = background.read(16001)
+                require(len(raw) <= 16000, 'Background context exceeds 16,000 bytes'); raw.decode('utf-8')
                 add('background_context', 'READY', 'Background context is within the UTF-8 text bound; its content remains unverified.')
             else: add('background_context', 'NOT_CONFIGURED', 'Optional background context was not supplied.', 'Put application articles in knowledge/inbox/context.md, at most 16,000 UTF-8 bytes.')
         except (ValidationError, OSError, UnicodeError):
@@ -255,7 +275,7 @@ def inspect_workspace(workspace, manifest=None, *, port=None, environ=None, coor
     else: add('db2', 'NOT_CONFIGURED', 'Optional Db2 MCP endpoint is not configured.', 'Set WB_DB2_MCP_URL and private authentication if live discovery is needed.')
     if env.get('WB_ZOWE_PROFILE'):
         try:
-            ZoweReader(env['WB_ZOWE_PROFILE'])
+            ZoweReader(env['WB_ZOWE_PROFILE'], env.get('WB_ZOWE_ZOSMF_PROFILE'))
             require(shutil.which('zowe', path=env.get('PATH', os.defpath)), 'Zowe CLI is not on PATH')
             hint = env.get('WB_DATASET_HINT', '*')
             require(isinstance(hint,str) and re.fullmatch(r'[A-Za-z0-9@$#.*()_-]{1,150}', hint) and not hint.startswith('-'), 'Invalid dataset hint')

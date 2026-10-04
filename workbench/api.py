@@ -12,6 +12,7 @@ from fastapi.responses import Response, JSONResponse
 from .coordinator import Coordinator
 from .domain import decode, ValidationError, require, safe_path
 from .reports import portfolio
+from .limits import MAX_HTTP_BODY_BYTES, MAX_UI_SOURCE_BYTES
 
 def create_app(root, origin='http://127.0.0.1:8765'):
     c=Coordinator(root)
@@ -39,7 +40,7 @@ def create_app(root, origin='http://127.0.0.1:8765'):
         return response
     @app.exception_handler(ValidationError)
     async def invalid(request,exc):return JSONResponse({'error':str(exc)},400)
-    async def body(request, limit=12*1024*1024):
+    async def body(request, limit=MAX_HTTP_BODY_BYTES):
         raw=bytearray()
         async for chunk in request.stream():
             if len(raw)+len(chunk)>limit:raise HTTPException(413,'Request exceeds the permitted size')
@@ -48,10 +49,16 @@ def create_app(root, origin='http://127.0.0.1:8765'):
     def display_process(doc):
         # Polling never repeats full synthetic record bodies. Evidence is downloaded on demand.
         result=dict(doc)
+        result['blocker_count']=len(doc.get('blockers',[]))
+        result['blockers']=doc.get('blockers',[])[:50]
+        result['blockers_truncated']=result['blocker_count']>50
         result['runs']=[{k:v for k,v in run.items() if k!='programs'}|{'programs':{name:{k:v for k,v in r.items() if k not in ('actual','differences')}|{'case_count':len(r['actual']),'difference_count':len(r['differences'])} for name,r in run['programs'].items()}} for run in doc['runs']]
         if doc.get('analysis'):
             accounting=doc['analysis'].get('source_accounting')
             result['analysis']={k:v for k,v in doc['analysis'].items() if k not in ('programs','source_accounting')}
+            result['analysis']['assets']=[{k:v for k,v in asset.items() if k not in ('source_text','coverage','rules','fields')} for asset in doc['analysis'].get('assets',[])]
+            result['analysis']['blocker_count']=len(doc['analysis'].get('blockers',[]))
+            result['analysis']['blockers']=doc['analysis'].get('blockers',[])[:50]
             result['analysis'].update(source_accounted_file_count=len(accounting) if isinstance(accounting,dict) else None,
                                       source_accounted_line_count=sum(len(rows) for rows in accounting.values()) if isinstance(accounting,dict) else None)
         from .executive import accepted_executive
@@ -62,9 +69,11 @@ def create_app(root, origin='http://127.0.0.1:8765'):
     @app.get('/api/state')
     async def state():
         from .provider import empty_usage_summary
+        from .inventory import load_inventory
         return {'processes':[display_process(p) for p in c.ledger.list(True)],'portfolio':portfolio(c.ledger),'token':token,
+                'inventory_baseline':load_inventory(c.root),
                 'provider_usage':c.provider.usage_summary() if c.provider else empty_usage_summary(),
-                'capability':'Flat COBOL IF / literal MOVE subset. Other syntax remains blocked.',
+                'capability':'Job-led discovery, Copilot Chat analysis and source accountability; executable credit requires verified semantic adapters.',
                 'connections':{'zowe_profile_configured':bool(__import__('os').environ.get('WB_ZOWE_PROFILE')),'db2_endpoint_configured':bool(__import__('os').environ.get('WB_DB2_MCP_URL')),'llm_configured':bool(c.provider),'local_source_export':(c.root/'Endeavor').is_dir()}}
     @app.get('/api/setup')
     async def setup():
@@ -104,7 +113,27 @@ def create_app(root, origin='http://127.0.0.1:8765'):
                 for s in j['steps']:rows.append([j['order'],j['name'],s['order'],s['name'],s['program'],';'.join(s['inputs']),';'.join(s['outputs']),s['condition']])
             b['manifest']='- Process ID: '+m['id']+'\n- Process name: '+m['name']+'\n| '+' | '.join(HEADERS)+' |\n'+'\n'.join('| '+' | '.join(map(str,r))+' |' for r in rows)
         require(isinstance(b.get('manifest'),str),'Provide a Markdown or Excel process manifest')
-        return c.create(b['manifest'],b.get('sources'),False,b.get('prompt',''))
+        sources=b.get('sources')
+        if sources is not None:
+            require(isinstance(sources,dict) and all(isinstance(v,str) for v in sources.values()),'Uploaded sources must be text files')
+            require(sum(len(v.encode('utf-8')) for v in sources.values())<=MAX_UI_SOURCE_BYTES,'Browser source upload exceeds 32 MiB; retain the complete repository in local Endeavor instead')
+        return await asyncio.to_thread(c.create,b['manifest'],sources,False,b.get('prompt',''),b.get('assistant_mode','copilot_chat'))
+
+    @app.get('/api/process/{pid}/agent/task')
+    async def agent_task(pid:str):return await asyncio.to_thread(c.agent_task,pid)
+    @app.get('/api/process/{pid}/agent/lineage')
+    async def agent_lineage(pid:str):
+        doc=c.ledger.get(pid);c.sources(doc)
+        require(doc.get('lineage_artifact'),'Start this process to map its lineage')
+        return decode(c.artifact(pid,doc['lineage_artifact']).read_bytes())
+    @app.get('/api/process/{pid}/agent/source')
+    async def agent_source(pid:str,path:str,start_line:int=1,end_line:int|None=None):
+        from .copilot import source_excerpt
+        doc=c.ledger.get(pid);return source_excerpt(doc,c.sources(doc),path,start_line,end_line)
+    @app.post('/api/process/{pid}/agent/analysis')
+    async def agent_analysis(pid:str,request:Request):
+        submitted=await body(request,128*1024)
+        return await asyncio.to_thread(c.submit_agent_analysis,pid,submitted)
     @app.post('/api/demo')
     async def demo():
         examples=Path(__file__).parent.parent/'examples';pid='demo-'+secrets.token_hex(4)
@@ -114,6 +143,7 @@ def create_app(root, origin='http://127.0.0.1:8765'):
     @app.post('/api/process/{pid}/{action}')
     async def action(pid:str,action:str,request:Request):
         if action=='start':return c.start(pid)
+        if action=='refresh-analysis':return c.refresh_analysis(pid)
         if action in ('pause','resume','cancel'):return c.control(pid,action)
         require(action=='answers','Unknown action')
         b=await body(request)

@@ -63,7 +63,8 @@ class KnowledgeWorkflowTests(unittest.TestCase):
         self.assertTrue(validate_workspace(self.root))
 
     def test_line_capacity_and_binary_source_are_rejected_before_intake(self):
-        for sources in ({'empty.txt':'\n'*100001}, {'A':'\n'*60000,'B':'\n'*60000}, {'binary.cbl':'\x00'}):
+        from workbench.limits import MAX_SOURCE_LINES
+        for sources in ({'empty.txt':'\n'*(MAX_SOURCE_LINES+1)}, {'A':'\n'*(MAX_SOURCE_LINES//2+1),'B':'\n'*(MAX_SOURCE_LINES//2+1)}, {'binary.cbl':'\x00'}):
             with self.subTest(paths=list(sources)),self.assertRaises(ValidationError):self.c.create(MANIFEST,sources)
         self.assertEqual(self.c.ledger.list(),[])
 

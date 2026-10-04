@@ -1,5 +1,6 @@
 """One frozen metric model drives CSV, workbook and editable PowerPoint."""
 import csv
+import json
 from pathlib import Path
 from io import StringIO
 from openpyxl import Workbook
@@ -10,6 +11,7 @@ from .domain import encode, atomic_json, sha, require
 from .ledger import now
 from .coverage import build_coverage, write_coverage
 from .executive import executive_summary, render_executive, inspect_executive, PRIMARY_REPORT
+from .inventory import report_inventory
 
 def metrics(ledger, doc, coverage=None, portfolio_model=None):
     coverage=coverage or build_coverage(doc,ledger.root)
@@ -20,17 +22,22 @@ def metrics(ledger, doc, coverage=None, portfolio_model=None):
     assets=[x for x in a['assets'] if x.get('selected',True)];run=doc['runs'][-1] if doc['runs'] else {'programs':{}}
     verified=0;matches=0;cases=0
     answers=(doc.get('answers') or {}).get('items',{})
+    source_status={}
+    for row in coverage['rows']:
+        if row['disposition'] in ('non_executable','out_of_scope'):continue
+        status=source_status.setdefault(row['source_path'],{'applicable':0,'verified':True})
+        status['applicable']+=1;status['verified'] &= row['disposition'] in ('mapped_verified','platform_replaced_verified')
     for name,p in a['programs'].items():
         r=run['programs'].get(name)
         if not r:continue
         cases+=len(r['actual'])
-        program_rows=[row for row in coverage['rows'] if row['source_path']==p['path'] and row['disposition'] not in ('non_executable','out_of_scope')]
-        if program_rows and all(row['disposition'] in ('mapped_verified','platform_replaced_verified') for row in program_rows) and not r['differences'] and r['coverage']['complete'] and not p['blockers']:
+        program_status=source_status.get(p['path'],{})
+        if program_status.get('applicable',0)>0 and program_status.get('verified') and not r['differences'] and r['coverage']['complete'] and not p['blockers']:
             matches+=len(r['actual'])-len(r['differences'])
             verified+=sum(answers.get(rule['id'],{}).get('answer')=='Yes' and not answers.get(rule['id'],{}).get('correction') for rule in p['rules'])
     versions=doc.get('program_versions',{})
     target_loc=sum(sum(bool(x.strip()) and not x.lstrip().startswith('#') for x in ((ledger.root/'shared/target/python'/f'{v}.py').read_text().splitlines() if (ledger.root/'shared/target/python'/f'{v}.py').is_file() else [])) for v in set(versions.values()))
-    return {'process_id':doc['id'],'demo':doc['demo'],'report_final_status':final_status,
+    result={'process_id':doc['id'],'demo':doc['demo'],'report_final_status':final_status,
         'portfolio_completed_processes':projected['completed_processes'],
         'portfolio_basis':'Includes current report outcome upon atomic artifact acceptance; excludes demonstrations',
         'source_programs':len(a['programs']),
@@ -59,6 +66,24 @@ def metrics(ledger, doc, coverage=None, portfolio_model=None):
         'observed_mainframe_parity':False,'evidence_basis':'SOURCE_DERIVED_EXPECTED',
         'verification_percent_denominator':'Extracted known rules only; unsupported and unknown rules are not silently excluded from completion gates.',
         'target_environment':'Non-production Python / SQLite; JSON record adapter'}
+    with ledger.lock:documents=ledger.list()
+    result['estate_inventory_json']=json.dumps(report_inventory(doc,documents,coverage),ensure_ascii=False,sort_keys=True)
+    result['adapter_priorities_json']=json.dumps([{key:value for key,value in group.items() if key!='source_paths'} | {'source_files':len(group['source_paths']),'evidence':'coverage.json summary.adapter_groups'} for group in summary.get('adapter_groups',[])],ensure_ascii=False,sort_keys=True)
+    validation=doc.get('logic_validation')
+    if doc.get('logic_validation_min_records'):
+        records=[value.get('coverage',{}).get('logic_validation') for value in run['programs'].values()]
+        records=[value for value in records if isinstance(value,dict)]
+        meeting=sum(value.get('logic_meeting_minimum',0) for value in records)
+        validation={**(validation or {}),'contract_version':3,'minimum_distinct_records_per_logic':doc['logic_validation_min_records'],
+                    'known_supported_logic':len(a['rules']),'logic_meeting_minimum':meeting,
+                    'known_logic_missing_minimum':max(0,len(a['rules'])-meeting),
+                    'unresolved_record_gaps':sum(value.get('gaps',0) for value in records),
+                    'unsupported_source_lines':result['unsupported_source_lines'],
+                    'unknown_legacy_logic_count':None,
+                    'complete':bool(records) and (validation or {}).get('complete',True) and all(value.get('complete') for value in records) and not a.get('blockers'),
+                    'basis':'Distinct source predicate input states at execution; duplicates and unused-field padding do not count. Unsupported logic remains unresolved; records do not prove complete legacy parity.'}
+    if validation is not None:result['logic_validation_json']=json.dumps(validation,ensure_ascii=False,sort_keys=True)
+    return result
 
 def portfolio(ledger):
     with ledger.lock:
@@ -108,7 +133,8 @@ def generate_reports(ledger,doc,root,checkpoint=None):
     coverage_paths=write_coverage(coverage,root)
     final_status='COMPLETED' if coverage['summary']['completion_eligible'] and not doc.get('blockers') and not doc.get('cancel_requested') else 'COMPLETED_WITH_BLOCKERS'
     pf=report_portfolio(ledger,doc,final_status)
-    m=metrics(ledger,doc,coverage,portfolio_model=pf);model={'created':now(),'metrics':m,'portfolio':pf,'blockers':doc['blockers'],'lineage':(doc.get('analysis') or {}).get('graph',[])}
+    m=metrics(ledger,doc,coverage,portfolio_model=pf);model={'created':now(),'metrics':m,'portfolio':pf,'blockers':doc['blockers'],'lineage':doc.get('lineage',(doc.get('analysis') or {}).get('graph',[]))}
+    model['inventory']=json.loads(m['estate_inventory_json'])
     model['executive_context']={key:doc.get(key) for key in ('id','name','status','demo','fixture_only','cancel_requested','packet_imported','verification_finished','manifest_hash','blockers')}
     model['executive_context']['analysis']={'source_snapshot':(doc.get('analysis') or {}).get('source_snapshot')}
     model['executive_context']['artifacts']=[name for name in doc.get('artifacts',[]) if name=='analysis/source-analysis.json']
@@ -123,6 +149,15 @@ def generate_reports(ledger,doc,root,checkpoint=None):
     portfolio_sheet=book.create_sheet('Portfolio');portfolio_sheet.append(['Measure','Value'])
     for key,value in model['portfolio'].items():portfolio_sheet.append([key,value])
     portfolio_sheet.column_dimensions['A'].width=42;portfolio_sheet.column_dimensions['B'].width=95
+    estate=book.create_sheet('Estate inventory')
+    estate.append(['Category','Declared baseline (unverified)','Observed process','Converted process POC','Converted cumulative POC','Remaining vs baseline','Unique versions','Memberships'])
+    for row in model['inventory']['rows']:
+        label=row['label'];label="'"+label if label.lstrip().startswith(('=','+','-','@')) else label
+        estate.append([label,row['baseline_count'],'Unknown' if row['process_observed_count'] is None else row['process_observed_count'],row['process_converted_count'],row['cumulative_converted_count'],row['remaining_vs_baseline'],row['portfolio_unique_versions'],row['portfolio_memberships']])
+    estate.append(['Declared total',model['inventory']['declared_total']]);estate.append(['Category sum',model['inventory']['category_total']]);estate.append(['Unreconciled',model['inventory']['unreconciled_count']])
+    estate.append(['Baseline status',model['inventory']['baseline_status']]);estate.append(['Count basis',model['inventory']['scope_boundary']])
+    estate.freeze_panes='B2'
+    estate.column_dimensions['A'].width=32
     history=book.create_sheet('History');history.append(['Process','Created','Programs','Verified rules','Acceptance'])
     accepted_history=ledger.history()
     for h in accepted_history:
@@ -132,21 +167,29 @@ def generate_reports(ledger,doc,root,checkpoint=None):
         history.append([doc['id'],model['created'],m['source_programs'],m['rules_verified'],'Current report upon atomic acceptance'])
     book.save(root/'metrics.xlsx');book.close()
     prs=Presentation();prs.slide_width=Inches(13.333);prs.slide_height=Inches(7.5)
-    def slide(title,rows,note):
+    def slide(title,rows,note,headers=None):
         s=prs.slides.add_slide(prs.slide_layouts[6]);s.background.fill.solid();s.background.fill.fore_color.rgb=RGBColor(248,250,252)
         box=s.shapes.add_textbox(Inches(.6),Inches(.35),Inches(12.1),Inches(.7))
         p=box.text_frame.paragraphs[0];p.text=title;p.font.size=Pt(27);p.font.bold=True;p.font.color.rgb=RGBColor(15,35,60)
-        table=s.shapes.add_table(len(rows)+1,2,Inches(.65),Inches(1.4),Inches(12),Inches(min(4.5,(len(rows)+1)*.52))).table
-        table.columns[0].width=Inches(7.6);table.columns[1].width=Inches(4.4)
-        for i,row in enumerate([['Measure','Evidence / value']]+rows):
+        headers=headers or ['Measure','Evidence / value']
+        table=s.shapes.add_table(len(rows)+1,len(headers),Inches(.65),Inches(1.4),Inches(12),Inches(min(4.5,(len(rows)+1)*.52))).table
+        if len(headers)==2:table.columns[0].width=Inches(7.6);table.columns[1].width=Inches(4.4)
+        else:
+            table.columns[0].width=Inches(4.2)
+            for column in list(table.columns)[1:]:column.width=Inches(7.8/(len(headers)-1))
+        for i,row in enumerate([headers]+rows):
             for j,value in enumerate(row):
                 cell=table.cell(i,j);cell.text=str(value);cell.fill.solid();cell.fill.fore_color.rgb=RGBColor(15,35,60) if i==0 else RGBColor(255,255,255)
                 for par in cell.text_frame.paragraphs:
-                    par.font.size=Pt(16);par.font.color.rgb=RGBColor(255,255,255) if i==0 else RGBColor(25,45,65)
+                    par.font.size=Pt(16 if len(headers)==2 else 13);par.font.color.rgb=RGBColor(255,255,255) if i==0 else RGBColor(25,45,65)
         b=s.shapes.add_textbox(Inches(.65),Inches(6.35),Inches(12),Inches(.8));b.text_frame.word_wrap=True
         b.text_frame.text=('Fictional test fixture. ' if doc.get('fixture_only') else '')+note
         for par in b.text_frame.paragraphs:par.font.size=Pt(13);par.font.color.rgb=RGBColor(70,85,105)
-    slide('Modernization POC · '+doc['id'],[['Source COBOL programs',m['source_programs']],['Copybooks',m['source_copybooks']],['Generated Python programs',m['target_python_programs']],['Synthetic cases / matching',f"{m['synthetic_cases']} / {m['matching_cases']}"],['Unresolved blockers',m['unresolved_blockers']]],'Fictional demonstration' if doc['demo'] else 'Evidence is source-derived; no mainframe program was executed.')
+    inventory=model['inventory']
+    inventory_rows=[[row['label'],row['baseline_count'],'Unknown' if row['process_observed_count'] is None else row['process_observed_count'],row['process_converted_count'],row['remaining_vs_baseline']] for row in inventory['rows']]
+    slide('Estate inventory · '+doc['id'],inventory_rows,
+          f"User-reported, unverified: declared {inventory['declared_total']:,}; category sum {inventory['category_total']:,}; unreconciled {inventory['unreconciled_count']:,}. Delta = baseline minus cumulative verified local POC assets. CICS screens are separate from transactions; staging locations provide no conversion credit.",
+          ['Category','Baseline','Process','Converted','Delta'])
     slide('Before → after',[['BMS screens → React business screens',f"{m['source_bms_screens']} → 0"],['Business REST APIs generated',0],['All selected source code LOC → program Python LOC',f"{m['source_code_loc']} → {m['target_program_code_loc']}"],['CICS / VSAM / inbound / outbound counts','Unknown until evidenced'],['Target environment','Python / SQLite (non-production)']],'Workbench UI and its control endpoints are excluded from modernized business-screen/API counts. LOC is a size metric, not a parity metric.')
     slide('Rule verification',[['Extracted known rules',m['rules_documented']],['SME-confirmed + tested rules',m['rules_verified']],['Known-rule verification','Unknown' if m['known_rule_verification_percent'] is None else str(m['known_rule_verification_percent'])+'%'],['Unsupported source lines',m['unsupported_source_lines']],['Observed mainframe parity','NOT established']],'The percentage covers extracted known rules only. Unknown/unsupported behavior remains a blocker; passing synthetic tests is not proof of full legacy parity.')
     cs=coverage['summary']

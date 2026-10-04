@@ -17,6 +17,8 @@ GLOBAL_QUESTIONS = [
 CHECKLIST_HEADER = ['Item ID','What we understood','Source evidence','Category','Answer','If No, what should it be?','Reviewer']
 CONTEXT_CHUNK_SIZE = 16000
 CHECKLIST_TEXT_LIMIT = 4000
+SME_ITEM_LIMIT = 2000
+TECHNICAL_GAP_KINDS = frozenset(('unsupported_source','unsupported_jcl','unsupported_utility','source_classification'))
 
 
 def _celltext(text):
@@ -44,8 +46,79 @@ def _context_rows(packet):
                                          for i in range(0,len(context),CONTEXT_CHUNK_SIZE)]
 
 
+def _number_spans(numbers):
+    """Lossless inclusive spans for source lines and zero-based blocker indices."""
+    spans=[]
+    for number in sorted(set(numbers)):
+        if spans and number==spans[-1][1]+1:spans[-1][1]=number
+        else:spans.append([number,number])
+    return spans
+
+
+def _compact_technical_gaps(analysis, context_data):
+    # The coordinator freezes and registers this complete artifact before issuing
+    # the packet. Referencing its canonical hash avoids duplicating millions of
+    # source/coverage rows into Excel while retaining every original blocker.
+    context_data['source_analysis']={
+        'path':'analysis/source-analysis.json','sha256':sha(encode(analysis)),
+        'source_snapshot':analysis['source_snapshot'],
+        'evidence_basis':analysis.get('evidence_basis','SOURCE_DERIVED_EXPECTED'),
+        'raw_blocker_count':len(analysis['blockers']),'blockers_json_pointer':'/blockers',
+        'blocker_index_base':0,'source_line_index_base':1,
+        'files':{asset['path']:{'source_sha256':asset['source_hash'],
+                               'physical_lines':asset.get('loc',{}).get('physical')}
+                 for asset in analysis.get('assets',[])},
+        'programs':{name:{'path':program['path'],'source_sha256':program['source_hash'],
+                          'coverage_json_pointer':'/programs/'+name+'/coverage',
+                          'coverage_sha256':sha(encode(program.get('coverage',[]))),
+                          'coverage_line_count':len(program.get('coverage',[]))}
+                    for name,program in analysis['programs'].items()},
+    }
+    program_by_path={program['path']:name for name,program in analysis['programs'].items()}
+    groups={};items=[]
+    for index,blocker in enumerate(analysis['blockers']):
+        if blocker['kind'] not in TECHNICAL_GAP_KINDS:
+            items.append({'id':f'B_{index:03d}','question':'Is this unresolved item described correctly? If no, explain what it should do. '+blocker['message'],
+                          'evidence':blocker.get('path','Source/intake evidence'),'kind':'unresolved_item'})
+            continue
+        path=blocker.get('path','Source/intake evidence')
+        program=program_by_path.get(path) or blocker.get('program') or blocker.get('utility_id') or path
+        key=(program,path,blocker['kind'])
+        group=groups.setdefault(key,{'program':program,'path':path,'kind':blocker['kind'],
+                                     'indices':[],'source_lines':{}})
+        group['indices'].append(index)
+        if blocker.get('lines'):
+            group['source_lines'].setdefault(path,[]).extend(blocker['lines'])
+        for reference in blocker.get('source_refs',[]):
+            if isinstance(reference,dict) and isinstance(reference.get('line'),int):
+                group['source_lines'].setdefault(reference.get('path',path),[]).append(reference['line'])
+    context_data['technical_gaps']={}
+    for key,group in sorted(groups.items()):
+        item_id='TG_'+sha(encode(list(key)))[:16]
+        indices=group.pop('indices');source_lines=group.pop('source_lines')
+        group.update({'blocker_count':len(indices),'blocker_index_spans':_number_spans(indices),
+                      'blockers_sha256':sha(encode([analysis['blockers'][i] for i in indices])),
+                      'source_line_spans':{path:_number_spans(lines) for path,lines in sorted(source_lines.items())}})
+        context_data['technical_gaps'][item_id]=group
+        items.append({'id':item_id,
+                      'question':f"Are these technical gaps for {group['program']} described correctly? "
+                                 f"{group['blocker_count']} {group['kind']} blocker records need a reviewed semantic adapter. "
+                                 'Confirm or correct the required source behavior. These gaps remain unsupported until the adapter is implemented and verified; Yes confirms the description only.',
+                      'evidence':group['path']+'; see Context > technical_gaps > '+item_id+
+                                 ' and source_analysis for exact blocker records, source spans, hashes and complete coverage.',
+                      'kind':'technical_gap'})
+    return items
+
+
 def packet_document(process):
     a=process['analysis']
+    # Marker-absent historical documents must reproduce the original v1 packet
+    # bytes/hash, including their original size gate. New intake opts into v2.
+    packet_version=process.get('sme_packet_version',1)
+    require(type(packet_version) is int and packet_version in (1,2),'Unsupported SME packet version')
+    if packet_version==2:
+        require(len(a['rules'])<=SME_ITEM_LIMIT,
+                'SME packet exceeds supported size; business rules require individual human items; narrow the process scope before issuing')
     items=[{'id':r['id'],'question':r['plain'],'evidence':'; '.join(r['source_refs']),'kind':'business_rule'} for r in a['rules']]
     context_data={'jobs':process['jobs'],'layouts':{n:p['fields'] for n,p in a['programs'].items()},'relationships':a['relationships'],'knowledge_input':process.get('knowledge_context')}
     items += [{'id':k,'question':q,'evidence':'See process inventory/layout/relationship context','kind':'process_assumption'} for k,q in GLOBAL_QUESTIONS]
@@ -66,8 +139,11 @@ def packet_document(process):
     suggestions=process.get('llm',{}).get('analysis',{})
     for n,text in enumerate(suggestions.get('questions',[])+suggestions.get('assumptions',[])):
         items.append({'id':f'LLM_{n:03d}','question':text,'evidence':'Unverified LLM suggestion; validate against source/context','kind':'provider_suggestion'})
-    for i,b in enumerate(a['blockers']):items.append({'id':f'B_{i:03d}','question':'Is this unresolved item described correctly? If no, explain what it should do. '+b['message'],'evidence':b.get('path','Source/intake evidence'),'kind':'unresolved_item'})
-    require(len(items)<=2000,'SME packet exceeds supported size; retain a scope blocker before issuing')
+    if packet_version==2 and len(items)+len(a['blockers'])>SME_ITEM_LIMIT:
+        items += _compact_technical_gaps(a,context_data)
+    else:
+        for i,b in enumerate(a['blockers']):items.append({'id':f'B_{i:03d}','question':'Is this unresolved item described correctly? If no, explain what it should do. '+b['message'],'evidence':b.get('path','Source/intake evidence'),'kind':'unresolved_item'})
+    require(len(items)<=SME_ITEM_LIMIT,'SME packet exceeds supported size; retain a scope blocker before issuing')
     require(len({item['id'] for item in items})==len(items),'SME packet contains duplicate question identities')
     details={}
     for item in items:
@@ -82,7 +158,7 @@ def packet_document(process):
             _validate_cell_capacity(_celltext(_display_text(item,field)),'Checklist '+field)
     if details:context_data['checklist_details']=details
     context=json.dumps(context_data,ensure_ascii=False,indent=2,sort_keys=True)
-    doc={'version':1,'process_id':process['id'],'source_snapshot':a['source_snapshot'],'items':items,'context':context}
+    doc={'version':packet_version,'process_id':process['id'],'source_snapshot':a['source_snapshot'],'items':items,'context':context}
     doc['packet_hash']=sha(encode(doc))
     for row in _metadata_rows(doc):
         for value in row:_validate_cell_capacity(value,'Review metadata')

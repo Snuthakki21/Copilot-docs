@@ -10,9 +10,10 @@ import unicodedata
 import zipfile
 import zlib
 from io import BytesIO
+from .limits import (MAX_ARCHIVE_BYTES, MAX_ARCHIVE_ENTRIES, MAX_ARCHIVE_MEMBER_BYTES,
+                     MAX_JSON_DOCUMENT_BYTES, MAX_SOURCE_LINES, MAX_UPLOAD_BYTES)
 
-MAX_UPLOAD = 8 * 1024 * 1024
-MAX_SOURCE_LINES = 100_000
+MAX_UPLOAD = MAX_UPLOAD_BYTES
 # Supported predicates can contain 192 comparisons. Leave room for their
 # analysis/process wrappers while keeping arbitrary document nesting bounded.
 MAX_DOCUMENT_DEPTH = 256
@@ -55,7 +56,7 @@ def sha(data):
     return hashlib.sha256(data if isinstance(data, bytes) else data.encode()).hexdigest()
 
 
-def encode(value):
+def encode(value, limit=MAX_JSON_DOCUMENT_BYTES):
     try:
         # The writer must not persist values that the bounded reader cannot
         # recover, or silently coerce object keys into different identities.
@@ -68,12 +69,22 @@ def encode(value):
                 pending.extend((child, depth + 1) for pair in item.items() for child in pair)
             elif isinstance(item, (list, tuple)):
                 pending.extend((child, depth + 1) for child in item)
-        return (json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True, allow_nan=False) + '\n').encode('utf-8')
+        encoder = json.JSONEncoder(ensure_ascii=False, indent=2, sort_keys=True, allow_nan=False)
+        output, size = BytesIO(), 1
+        for chunk in encoder.iterencode(value):
+            raw = chunk.encode('utf-8')
+            size += len(raw)
+            require(size <= limit, 'JSON document exceeds the configured size limit')
+            output.write(raw)
+        output.write(b'\n')
+        return output.getvalue()
+    except ValidationError:
+        raise
     except (ValueError, TypeError, UnicodeError, RecursionError) as exc:
         raise ValidationError('Invalid JSON document for persistence') from exc
 
 
-def decode(data, limit=MAX_UPLOAD):
+def decode(data, limit=MAX_JSON_DOCUMENT_BYTES):
     require(isinstance(data, (str, bytes, bytearray)), 'JSON document must be text or bytes')
     try:
         size = len(data.encode('utf-8')) if isinstance(data, str) else len(data)
@@ -148,7 +159,7 @@ def checked_zip(data):
     try:
         archive = zipfile.ZipFile(BytesIO(data))
         entries = archive.infolist()
-        require(len(entries) <= 300 and sum(x.file_size for x in entries) <= 32 * 1024 * 1024, 'Archive expansion exceeds limit')
+        require(len(entries) <= MAX_ARCHIVE_ENTRIES and sum(x.file_size for x in entries) <= MAX_ARCHIVE_BYTES, 'Archive expansion exceeds limit')
         require(len({x.filename for x in entries}) == len(entries), 'Duplicate archive members are not accepted')
         identities = {}
         for x in entries:
@@ -164,7 +175,7 @@ def checked_zip(data):
             kind = stat.S_IFMT(x.external_attr >> 16)
             require(kind in {0, stat.S_IFREG, stat.S_IFDIR}, 'Archive members must be regular files or directories')
             require(not x.is_dir() or x.file_size == 0, 'Archive directory contains unexpected data')
-            require(x.file_size <= 8 * 1024 * 1024, 'Archive member exceeds limit')
+            require(x.file_size <= MAX_ARCHIVE_MEMBER_BYTES, 'Archive member exceeds limit')
             # Read every member within the expansion budget so CRC/compression
             # failures cannot bypass the gate by using a non-XML filename.
             payload = archive.read(x)

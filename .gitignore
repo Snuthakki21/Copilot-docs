@@ -17,6 +17,16 @@ frontend/dist/
 *.log
 /shared/
 /tmp*/
+/zowe.config.json
+/zowe.config.user.json
+/zowe.schema.json
+/zowe.config.schema.json
+/mcp.json
+/.mcp.json
+/.vscode/mcp.json
+certificates/*.cert
+knowledge/inventory-baseline.json
+knowledge/input-locations.json
 !examples/Endeavor/
 !examples/Endeavor/**
 

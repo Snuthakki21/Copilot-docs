@@ -56,7 +56,7 @@ def executive_summary(doc, metrics, coverage=None):
         {'label':'Inspection and artifact hashes', 'file':'inspection.json'}]
     if 'analysis/source-analysis.json' in doc.get('artifacts', []):
         evidence.append({'label':'Frozen source analysis', 'file':'../../analysis/source-analysis.json'})
-    return {
+    result={
         'schema_version':1, 'process_id':doc['id'], 'process_name':doc.get('name',doc['id']),
         'status':status, 'demo':bool(doc.get('demo')), 'fixture_only':bool(doc.get('fixture_only')),
         'primary_report':PRIMARY_REPORT,
@@ -90,6 +90,16 @@ def executive_summary(doc, metrics, coverage=None):
         'boundary':'Bounded local source-derived POC verification. Observed mainframe parity and production readiness are not established.',
         'lineage':{'manifest_hash':doc.get('manifest_hash'), 'source_snapshot':analysis.get('source_snapshot'),
                    'coverage_file':'coverage.html', 'metrics_file':'metrics.json'}}
+    # Historical accepted reports reproduce their original model; new reports
+    # carry their complete frozen estate table through a scalar metrics field.
+    if 'estate_inventory_json' in m:
+        inventory=json.loads(m['estate_inventory_json'])
+        require(isinstance(inventory,dict) and inventory.get('schema_version')==1 and len(inventory.get('rows',[]))==8,
+                'Executive inventory model is incomplete')
+        result['inventory']=inventory
+    if 'logic_validation_json' in m:result['logic_validation']=json.loads(m['logic_validation_json'])
+    if 'adapter_priorities_json' in m:result['adapter_priorities']=json.loads(m['adapter_priorities_json'])
+    return result
 
 
 def render_executive(model):
@@ -109,6 +119,19 @@ def render_executive(model):
     actions = ''.join('<li>'+esc(action)+'</li>' for action in model['next_actions'])
     unknowns = '<p class="boundary">Unknown scope: '+esc(', '.join(model.get('scope_unknowns',[])))+'.</p>' if model.get('scope_unknowns') else ''
     links = ''.join('<li><a href="'+esc(item['file'])+'">'+esc(item['label'])+'</a></li>' for item in model['evidence'])
+    inventory_html=''
+    inventory=model.get('inventory')
+    if inventory:
+        inventory_rows=''.join('<tr><th scope="row">'+esc(row['label'])+'</th><td>'+esc(number(row['baseline_count']))+'</td><td>'+esc(number(row['process_observed_count']))+'</td><td>'+esc(number(row['process_converted_count']))+'</td><td>'+esc(number(row['remaining_vs_baseline']))+'</td></tr>' for row in inventory['rows'])
+        inventory_html='<h2>Estate baseline and process progress</h2><p>User-reported, unverified baseline: declared total '+esc(number(inventory['declared_total']))+' · eight-category sum '+esc(number(inventory['category_total']))+' · '+esc(number(inventory['unreconciled_count']))+' unreconciled. No assets are invented to close the difference.</p><table><thead><tr><th>Category</th><th>Baseline</th><th>Observed process</th><th>Converted process POC</th><th>Delta</th></tr></thead><tbody>'+inventory_rows+'</tbody></table><p class="boundary">Delta = declared baseline minus cumulative verified local POC assets. Baseline counts remain unverified; unknown process scope is not zero. '+esc(inventory['scope_boundary'])+'</p><p class="boundary">'+esc(inventory['availability_basis'])+'</p>'
+    adapters=model.get('adapter_priorities',[])
+    adapter_html=''
+    if adapters:
+        adapter_html='<h2>Required conversion adapters</h2><p>Unsupported syntax remains unresolved conversion work. Priority follows blocked-line volume; recognition and SME agreement alone do not implement an adapter.</p><ol>'+''.join('<li>'+esc(group['label'])+': '+esc(number(group['blocked_lines']))+' blocked lines across '+esc(number(group['source_files']))+' source files.</li>' for group in adapters)+'</ol>'
+    validation=model.get('logic_validation')
+    validation_html=''
+    if validation:
+        validation_html='<h2>Logic validation records</h2><p>Minimum '+esc(number(validation.get('minimum_distinct_records_per_logic')))+' distinct valid source-predicate input states per supported logic item. '+esc(number(validation.get('logic_meeting_minimum')))+' of '+esc(number(validation.get('known_supported_logic',validation.get('applicable_logic_count'))))+' known items meet the minimum; '+esc(number(validation.get('known_logic_missing_minimum')))+' do not. Unknown legacy logic count: Unknown.</p><p class="boundary">Duplicate records and unused-field padding do not count. Unsupported behavior and cross-file/native I/O gaps remain unresolved. Ten records alone do not establish complete conversion or observed mainframe parity.</p>'
     return '''<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Executive conversion report · '''+esc(model['process_id'])+'''</title>
@@ -119,8 +142,8 @@ def render_executive(model):
 <p><strong>Applicable-line verification: '''+esc(percent_text)+'''</strong> · '''+esc(number(progress['converted_lines']))+''' / '''+esc(number(scope['applicable_lines']))+''' lines.</p>
 <p class="muted">'''+esc(number(scope['source_files']))+''' exported files · '''+esc(number(scope['physical_lines']))+''' physical lines · '''+esc(number(scope['excluded_lines']))+''' excluded · '''+esc(number(scope['non_executable_lines']))+''' non-executable.</p>
 <p class="boundary">'''+esc(progress['denominator'])+'''</p>
-<h2>Before → after</h2><table><thead><tr><th>Measure</th><th>Before</th><th>After</th><th>What it means</th></tr></thead><tbody>'''+rows+'''</tbody></table>'''+unknowns+'''
-<h2>Next actions</h2><ol>'''+actions+'''</ol>
+'''+inventory_html+'''<h2>Before → after</h2><table><thead><tr><th>Measure</th><th>Before</th><th>After</th><th>What it means</th></tr></thead><tbody>'''+rows+'''</tbody></table>'''+unknowns+'''
+'''+validation_html+adapter_html+'''<h2>Next actions</h2><ol>'''+actions+'''</ol>
 <p class="boundary">'''+esc(model['boundary'])+'''</p>
 <details><summary>Supporting evidence and slides</summary><ul>'''+links+'''</ul><p>Frozen source, target spans, test witnesses and reasons are available through the lineage report. Issued evidence is preserved by report version.</p></details>
 </main></body></html>'''

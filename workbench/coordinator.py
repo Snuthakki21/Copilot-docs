@@ -13,6 +13,8 @@ from .fixtures import plan_cases, verify_program
 from .review import export_packet, read_answers
 from .knowledge import update_knowledge
 from .layout import require_layout, output_path
+from .limits import (MAX_SOURCE_FILES, MAX_SOURCE_ENTRIES, MAX_SOURCE_FILE_BYTES,
+                     MAX_SOURCE_BYTES, MAX_SOURCE_LINES, source_line_count)
 
 
 class StageInterrupted(Exception):
@@ -67,34 +69,26 @@ class Coordinator:
 
     def process_root(self,pid):return safe_path(self.root,'processes/'+identity(pid))
 
-    def create(self, manifest_text, source_files=None, demo=False, prompt=''):
+    def create(self, manifest_text, source_files=None, demo=False, prompt='', assistant_mode=None):
         require_layout(self.root)
         manifest=parse_manifest(manifest_text)
         if source_files is None:
-            folder=self.root/'Endeavor';source_files={}
-            if folder.exists():
-                require(folder.is_dir(),'Endeavor must be a source-export directory')
-                for entry,path in enumerate(folder.rglob('*'),1):
-                    require(entry<=10000,'Source directory traversal exceeds 10,000 entries; provide a process-scoped export')
-                    require(not path.is_symlink(),'Symlinks are not accepted in Endeavor')
-                    require(path.is_dir() or path.is_file(),'Endeavor accepts only regular source files and directories')
-                    if path.is_file():
-                        relative=path.relative_to(folder).as_posix()
-                        require(path.stat().st_size<=512000 and len(source_files)<200,'Endeavor export exceeds bounds: '+relative)
-                        try:source_files[relative]=path.read_bytes().decode('utf-8')
-                        except UnicodeError as exc:raise ValidationError('Endeavor file is not UTF-8 text: '+relative+'; supply a readable export for explicit source accounting') from exc
-        require(isinstance(source_files,dict) and 0<len(source_files)<=200,'Provide a source folder with 1 to 200 supported text files')
+            from .preflight import _read_sources
+            source_files,_=_read_sources(self.root)
+        require(isinstance(source_files,dict) and 0<len(source_files)<=MAX_SOURCE_FILES,f'Provide a source folder with 1 to {MAX_SOURCE_FILES:,} supported text files')
         require(all(isinstance(k,str) and isinstance(v,str) for k,v in source_files.items()),'Source filenames and contents must be text')
         require(all('\x00' not in value for value in source_files.values()),'Source contains NUL/binary content; provide readable source separately from data/load modules')
-        from .domain import MAX_SOURCE_LINES
-        require(sum(len(value.splitlines()) for value in source_files.values())<=MAX_SOURCE_LINES,'Source export exceeds 100,000 physical lines; provide a process-scoped export before generating coverage')
+        require(sum(source_line_count(value) for value in source_files.values())<=MAX_SOURCE_LINES,f'Source export exceeds {MAX_SOURCE_LINES:,} physical lines')
+        import os
+        assistant_mode=assistant_mode or os.environ.get('WB_ASSISTANT_MODE','deterministic')
+        require(assistant_mode in ('deterministic','disabled','copilot_chat','opt_in'),'Choose Copilot Chat, deterministic analysis, or the explicitly configured legacy provider')
         require(isinstance(prompt,str),'Analysis prompt must be text')
         try:
             encoded_sources={path:text.encode('utf-8') for path,text in source_files.items()}
             for path in source_files:path.encode('utf-8')
             encoded_manifest=manifest_text.encode('utf-8');prompt.encode('utf-8')
         except UnicodeError as exc:raise ValidationError('Source filenames, source text, manifest and prompt must be valid UTF-8 text without unpaired surrogates') from exc
-        require(sum(len(raw) for raw in encoded_sources.values())<=8*1024*1024,'Source export exceeds size bound')
+        require(sum(len(raw) for raw in encoded_sources.values())<=MAX_SOURCE_BYTES,'Source export exceeds combined size bound')
         # Reject collisions before any immutable process evidence is created.
         import unicodedata
         portable={}
@@ -112,13 +106,23 @@ class Coordinator:
             require(not any(p.name.casefold()==manifest['id'].casefold() for p in (self.root/'processes').glob('*')),'Process ID collides on case-insensitive platforms; use a unique ID')
             for path,text in source_files.items():
                 output_path(self.root,manifest['id'],'input/sources/'+path)
-                require(len(encoded_sources[path])<=512000,'Source file exceeds bounds: '+path)
+                require(len(encoded_sources[path])<=MAX_SOURCE_FILE_BYTES,'Source file exceeds bounds: '+path)
             doc=self.ledger.create(manifest,demo)
             try:
                 base=self.process_root(doc['id']);write_new(base/'input'/'process-input.md',encoded_manifest)
                 hashes={}
                 for path,raw in encoded_sources.items():hashes[path]=write_new(output_path(self.root,doc['id'],'input/sources/'+path),raw)
                 doc['source_files']=hashes;doc['manifest_hash']=sha(encoded_manifest);doc['prompt']=prompt[:16000]
+                doc['assistant_mode']=assistant_mode;doc['sme_packet_version']=2
+                doc['logic_validation_min_records']=10 if assistant_mode=='copilot_chat' else 0
+                from .inventory import snapshot_inventory
+                doc['inventory_baseline']=snapshot_inventory(self.root)
+                write_new(base/'analysis'/'inventory-baseline.json',encode(doc['inventory_baseline']))
+                self.register(doc,'analysis/inventory-baseline.json')
+                from .locations import input_locations
+                doc['application_input_locations']=input_locations(self.root)
+                write_new(base/'analysis'/'input-locations.json',encode(doc['application_input_locations']))
+                self.register(doc,'analysis/input-locations.json')
                 doc['mainframe_knowledge']=knowledge
                 write_new(base/'analysis'/'mainframe-knowledge.json',encode(knowledge))
                 self.register(doc,'analysis/mainframe-knowledge.json')
@@ -130,7 +134,7 @@ class Coordinator:
         with self.lock:
             require_layout(self.root)
             doc=self.ledger.get(pid);self.manifest_integrity(doc);require(doc['status']=='READY','Process already started; use Resume when applicable')
-            doc['authorization']={'recorded':now(),'scope':doc['source_files'],'target':'trusted-generated-subset/python-sqlite','seed':21,'max_cases_per_program':256,'max_repair_attempts':1,'source_operations':'read-only','mainframe_execution':False}
+            doc['authorization']={'recorded':now(),'scope':dict(doc['source_files']),'target':'verified-adapters/python-sqlite','seed':21,'max_cases_per_program':4096 if doc.get('logic_validation_min_records') else 256,'max_repair_attempts':1,'source_operations':'read-only','mainframe_execution':False}
             return self.ledger.save_event(doc,'QUEUED_ANALYSIS','start','Start authorization recorded; source writes and mainframe execution are prohibited')
 
     def control(self,pid,action):
@@ -138,10 +142,10 @@ class Coordinator:
             doc=self.ledger.get(pid)
             require(doc['status'] not in ('COMPLETED','COMPLETED_WITH_BLOCKERS'),'Terminal evidence cannot be changed in place')
             if action=='pause':
-                require(doc['status'] in ('QUEUED_ANALYSIS','ANALYZING','WAITING_SME','QUEUED_VERIFY','VERIFYING','QUEUED_REPORT','REPORTING'),'There is no running stage to pause; use Resume to recover a failed stage')
+                require(doc['status'] in ('QUEUED_ANALYSIS','ANALYZING','WAITING_DISCOVERY','WAITING_COPILOT','WAITING_SME','QUEUED_VERIFY','VERIFYING','QUEUED_REPORT','REPORTING'),'There is no running stage to pause; use Resume to recover a failed stage')
                 doc['resume_status']={'ANALYZING':'QUEUED_ANALYSIS','VERIFYING':'QUEUED_VERIFY','REPORTING':'QUEUED_REPORT'}.get(doc['status'],doc['status']);status='PAUSED'
             elif action=='resume':
-                require(doc['status'] in ('PAUSED','FAILED','REPORTING_FAILED'),'Nothing eligible to resume')
+                require(doc['status'] in ('PAUSED','FAILED','REPORTING_FAILED','WAITING_DISCOVERY'),'Nothing eligible to resume')
                 status=doc.pop('resume_status','QUEUED_REPORT' if doc['packet_imported'] else 'WAITING_SME' if doc['packet_issued'] else 'QUEUED_ANALYSIS')
                 if doc['status'] in ('FAILED','REPORTING_FAILED'):doc.setdefault('stage_attempts',{})[status]=0
                 if status=='QUEUED_ANALYSIS' and doc['packet_issued']:status='QUEUED_VERIFY' if doc['packet_imported'] else 'WAITING_SME'
@@ -223,6 +227,27 @@ class Coordinator:
             relative='analysis/mainframe-knowledge.json'
             raw=output_path(self.root,doc['id'],relative).read_bytes()
             require(raw==encode(snapshot) and sha(raw)==doc.get('artifact_hashes',{}).get(relative),'Frozen mainframe knowledge changed; preserve the original process evidence')
+        if 'inventory_baseline' in doc:
+            from .inventory import validate_snapshot
+            validate_snapshot(doc['inventory_baseline'])
+            relative='analysis/inventory-baseline.json';raw=output_path(self.root,doc['id'],relative).read_bytes()
+            require(raw==encode(doc['inventory_baseline']) and sha(raw)==doc.get('artifact_hashes',{}).get(relative),'Frozen inventory baseline changed')
+        if 'application_input_locations' in doc:
+            relative='analysis/input-locations.json';raw=output_path(self.root,doc['id'],relative).read_bytes()
+            require(raw==encode(doc['application_input_locations']) and sha(raw)==doc.get('artifact_hashes',{}).get(relative),'Frozen input location evidence changed')
+        if doc.get('lineage_artifact'):
+            relative=doc['lineage_artifact'];raw=output_path(self.root,doc['id'],relative).read_bytes()
+            require(raw==encode(doc.get('lineage')) and sha(raw)==doc.get('artifact_hashes',{}).get(relative),'Frozen lineage scope changed; discovery cannot be bypassed')
+        origins={}
+        pending=doc.get('pending_discovery',{}).get('artifact')
+        for relative in doc.get('artifacts',[]):
+            if not relative.startswith('analysis/discovery-') or relative==pending:continue
+            raw=output_path(self.root,doc['id'],relative).read_bytes()
+            require(sha(raw)==doc.get('artifact_hashes',{}).get(relative),'Frozen discovery provenance changed')
+            for entry in decode(raw)['files']:
+                require(doc['source_files'].get(entry['path'])==entry['source_hash'],'Retrieved source baseline differs from discovery journal')
+                origins[entry['path']]=entry['provenance']
+        require(origins==doc.get('discovery_provenance',{}),'Retrieved source provenance differs from frozen journals')
 
     def review_integrity(self,doc):
         self.manifest_integrity(doc)
@@ -243,10 +268,11 @@ class Coordinator:
 
     def sources(self,doc):
         self.manifest_integrity(doc)
+        self.recover_discovered_sources(doc)
         source_root=self.process_root(doc['id'])/'input'/'sources'
         inventory=set()
         for count,path in enumerate(source_root.rglob('*'),1):
-            require(count<=10000,'Frozen source traversal exceeds 10,000 entries')
+            require(count<=MAX_SOURCE_ENTRIES,'Frozen source traversal exceeds entry bound')
             require(not path.is_symlink() and (path.is_file() or path.is_dir()),
                     'Source snapshot contains an unsafe file')
             if path.is_file():inventory.add(path.relative_to(source_root).as_posix())
@@ -258,6 +284,75 @@ class Coordinator:
             require(sha(raw)==h,'Source snapshot changed; existing evidence cannot be credited')
             result[path]=raw.decode('utf-8')
         return result
+
+    def recover_discovered_sources(self,doc):
+        """Replay only a ledger-pinned, content-addressed read-only fetch journal."""
+        pending=doc.get('pending_discovery')
+        if not pending:return
+        relative=pending['artifact'];raw=output_path(self.root,doc['id'],relative).read_bytes()
+        require(sha(raw)==doc.get('artifact_hashes',{}).get(relative),'Discovery journal integrity failed')
+        entries=decode(raw)['files'];require(sha(encode(entries))==pending['hash'],'Discovery journal differs from recorded intent')
+        for item in entries:
+            path=item['path'];data=item['text'].encode('utf-8')
+            require(sha(data)==item['source_hash'] and item.get('provenance'),'Retrieved source lacks immutable origin evidence')
+            destination=output_path(self.root,doc['id'],'input/sources/'+path)
+            if destination.exists():require(destination.read_bytes()==data,'Retrieved source conflicts with preserved input: '+path)
+            else:write_new(destination,data)
+            doc['source_files'][path]=item['source_hash']
+        doc.setdefault('discovery_provenance',{}).update({e['path']:e['provenance'] for e in entries})
+        doc.pop('pending_discovery');self.ledger.save(doc)
+
+    def freeze_discovered_sources(self,doc,entries):
+        if not entries:return
+        existing=self.sources(doc);merged=dict(existing)
+        import unicodedata
+        folded={unicodedata.normalize('NFC',p).casefold():p for p in existing}
+        for entry in entries:
+            path=entry['path'];text=entry['text']
+            require(isinstance(text,str) and '\x00' not in text,'Retrieved source must be readable text')
+            require(Path(path).as_posix()==path and all(p not in ('','.','..') for p in path.split('/')),'Retrieved source path must be canonical')
+            output_path(self.root,doc['id'],'input/sources/'+path)
+            key=unicodedata.normalize('NFC',path).casefold()
+            require(key not in folded or folded[key]==path,'Retrieved source filename collision')
+            require(path not in merged or merged[path]==text,'Retrieved source conflicts with original export')
+            require(sha(text)==entry['source_hash'] and entry.get('provenance'),'Retrieved source hash/provenance missing')
+            folded[key]=path;merged[path]=text
+        require(len(merged)<=MAX_SOURCE_FILES and sum(len(t.encode('utf-8')) for t in merged.values())<=MAX_SOURCE_BYTES,'Retrieved closure exceeds source bounds')
+        require(all(len(t.encode('utf-8'))<=MAX_SOURCE_FILE_BYTES for t in merged.values()) and sum(source_line_count(t) for t in merged.values())<=MAX_SOURCE_LINES,'Retrieved closure exceeds file/line bounds')
+        fingerprint=sha(encode(entries));relative='analysis/discovery-'+fingerprint+'.json'
+        destination=output_path(self.root,doc['id'],relative);data=encode({'files':entries})
+        if destination.exists():require(destination.read_bytes()==data,'Discovery evidence collision')
+        else:write_new(destination,data)
+        self.register(doc,relative);doc['pending_discovery']={'artifact':relative,'hash':fingerprint}
+        self.checkpoint(doc)
+        self.recover_discovered_sources(doc)
+
+    def agent_task(self,pid):
+        with self.lock:
+            doc=self.ledger.get(pid);sources=self.sources(doc)
+            require(doc.get('copilot_task_artifact'),'Complete object discovery before requesting Copilot analysis')
+            return decode(self.artifact(pid,doc['copilot_task_artifact']).read_bytes())
+
+    def submit_agent_analysis(self,pid,submitted):
+        from .copilot import validate_submission
+        with self.lock:
+            doc=self.ledger.get(pid);require(doc['status']=='WAITING_COPILOT','Process is not waiting for Copilot Chat analysis')
+            result=validate_submission(self.agent_task(pid),submitted)
+            data=encode(result);relative='analysis/copilot-return-'+sha(data)+'.json'
+            write_new(output_path(self.root,pid,relative),data);self.register(doc,relative)
+            doc['llm']=result;doc['copilot_return_artifact']=relative
+            return self.ledger.save_event(doc,'QUEUED_ANALYSIS','copilot','Copilot analysis accepted as review context; no conversion gaps cleared')
+
+    def refresh_analysis(self,pid):
+        """Reassess actual adapter changes before the sole SME packet is issued."""
+        with self.lock:
+            doc=self.ledger.get(pid);self.sources(doc)
+            require(doc['status']=='WAITING_COPILOT' and not doc['packet_issued'],'Adapter reassessment is permitted only before the single SME packet')
+            doc['analysis']=None;doc['llm']={'status':'NOT_CONFIGURED','live_ready':False}
+            doc['copilot_iteration']=doc.get('copilot_iteration',0)+1
+            for key in ('copilot_task_artifact','copilot_return_artifact','analysis_artifact'):doc.pop(key,None)
+            doc.setdefault('stage_attempts',{})['QUEUED_ANALYSIS']=0
+            return self.ledger.save_event(doc,'QUEUED_ANALYSIS','adapters','Reassessing actual adapter code; previous tasks/evidence preserved and SME quota unchanged')
 
     def advance(self,pid):
         with self.lock:
@@ -294,8 +389,29 @@ class Coordinator:
         return self.ledger.get(pid) if self.ledger is not None else doc
 
     def analyze(self,doc):
-        pid=doc['id'];self.checkpoint(doc,'ANALYZING');self.ledger.event(pid,'analysis','Reading complete source snapshot and extracting supported atomic rules')
+        pid=doc['id'];self.checkpoint(doc,'ANALYZING');self.ledger.event(pid,'lineage','Indexing the retained export and resolving the selected job dependency closure before conversion')
         source_files=self.sources(doc)
+        from .lineage import map_lineage
+        from .connectors import ReadOnlyLineageResolver
+        strict=doc.get('assistant_mode')=='copilot_chat'
+        if not doc.get('lineage') or (strict and not doc['lineage']['closure']['complete']):
+            lineage=map_lineage(source_files,doc,doc.get('mainframe_knowledge'),resolver=ReadOnlyLineageResolver.from_environment() if strict else None)
+            self.freeze_discovered_sources(doc,lineage.get('source_snapshots',[]))
+            source_files=self.sources(doc)
+            # Fetched text is retained in immutable source snapshots and journal,
+            # not repeatedly copied into polling/status documents.
+            lineage={k:v for k,v in lineage.items() if k!='source_snapshots'}
+            data=encode(lineage);relative='analysis/lineage-'+sha(data)+'.json';path=output_path(self.root,pid,relative)
+            if path.exists():require(path.read_bytes()==data,'Lineage recovery differs from frozen evidence')
+            else:write_new(path,data)
+            self.register(doc,relative);doc['lineage']=lineage;doc['lineage_artifact']=relative
+        if strict and not doc['lineage']['closure']['complete']:
+            doc['blockers']=[{'kind':'lineage_unresolved','message':g.get('reason',g.get('message','Missing or ambiguous dependency')),'object':g} for g in doc['lineage']['closure']['gaps']]
+            self.stage_success(doc,'QUEUED_ANALYSIS');self.checkpoint(doc,'WAITING_DISCOVERY')
+            self.ledger.event(pid,'lineage','Discovery is incomplete; no conversion or SME packet has started',{'gaps':len(doc['blockers'])})
+            return
+        if strict:doc['lineage_scope']=doc['lineage']['scope']['selected_files']
+        self.ledger.event(pid,'analysis','Extracting atomic source logic within the discovered job scope; unsupported semantics remain explicit adapter obligations')
         analysis=doc.get('analysis') or analyze_sources(source_files,doc);self.checkpoint(doc);doc['analysis']=analysis;doc['blockers']=list(analysis['blockers'])
         context_path=self.root/'knowledge'/'inbox'/'context.md'
         if context_path.exists() and 'knowledge_context' not in doc:
@@ -304,7 +420,23 @@ class Coordinator:
         from .connectors import read_only_discovery
         if 'discovery' not in doc:doc['discovery']=read_only_discovery()
         doc.setdefault('llm',{'status':'NOT_CONFIGURED','live_ready':False})
-        if self.provider and doc['llm']['status']=='NOT_CONFIGURED':
+        if strict and doc['llm']['status']!='AGENT_ANALYSIS_RETURNED':
+            analysis_bytes=encode(analysis);analysis_relative='analysis/source-analysis-'+sha(analysis_bytes)+'.json'
+            frozen=output_path(self.root,pid,analysis_relative)
+            if frozen.exists():require(frozen.read_bytes()==analysis_bytes,'Analysis differs from frozen Copilot evidence')
+            else:write_new(frozen,analysis_bytes)
+            self.register(doc,analysis_relative);doc['analysis_artifact']=analysis_relative
+            from .copilot import build_task, unknown_usage
+            task=build_task(doc,source_files,analysis);data=encode(task);relative='analysis/copilot-task-'+sha(data)+'.json'
+            destination=output_path(self.root,pid,relative)
+            if destination.exists():require(destination.read_bytes()==data,'Copilot task recovery differs')
+            else:write_new(destination,data)
+            self.register(doc,relative);doc['copilot_task_artifact']=relative
+            doc['llm']={'status':'WAITING_COPILOT','live_ready':False,'usage':unknown_usage()}
+            self.stage_success(doc,'QUEUED_ANALYSIS');self.checkpoint(doc,'WAITING_COPILOT')
+            self.ledger.event(pid,'copilot','Frozen task ready for GitHub Copilot Chat through the workspace MCP bridge; no model endpoint required')
+            return
+        if self.provider and not strict and doc['llm']['status']=='NOT_CONFIGURED':
             try:
                 context=''
                 if doc.get('mainframe_knowledge'):
@@ -363,12 +495,15 @@ class Coordinator:
             if answer['answer']!='Yes' or answer['correction']:doc['blockers'].append({'kind':'sme_unresolved','item_id':rid,'message':'SME item '+rid+': '+answer['answer']+'. '+answer['correction'],'correction_preserved':bool(answer['correction'])})
         prior=[int(p.name[4:]) for p in (root/'synthetic').glob('run-*') if p.name[4:].isdigit()]
         run_id=f'run-{max([len(doc["runs"]),*prior])+1:04d}';runroot=root/'synthetic'/run_id;runroot.mkdir(parents=True,exist_ok=False)
-        run={'id':run_id,'created':now(),'programs':{},'evidence_basis':'SOURCE_DERIVED_EXPECTED','observed_legacy_parity':False,'target_profile':'trusted-generated-subset/python-sqlite-json'}
+        run={'id':run_id,'created':now(),'programs':{},'evidence_basis':'SOURCE_DERIVED_EXPECTED','observed_legacy_parity':False,'target_profile':'verified-adapters/python-sqlite-json'}
+        logic_summaries=[]
         self.ledger.event(pid,'synthetic','Generating source-derived boundaries, matching records and interaction witnesses; freezing expectations before target execution')
         for name,p in doc['analysis']['programs'].items():
             if p['blockers']:continue
             self.checkpoint(doc)
-            suite=plan_cases(p,doc['authorization']['seed'],doc['authorization']['max_cases_per_program']);self.checkpoint(doc)
+            args=(p,doc['authorization']['seed'],doc['authorization']['max_cases_per_program'])
+            suite=plan_cases(*args,min_records_per_logic=doc['logic_validation_min_records']) if doc.get('logic_validation_min_records') else plan_cases(*args)
+            self.checkpoint(doc)
             expected_path=runroot/name/'expected.json';write_new(expected_path,encode(suite));self.register(doc,f'synthetic/{run_id}/{name}/expected.json')
             target_path=self.root/'shared'/'target'/'python'/(doc['program_versions'][name]+'.py')
             code=target_path.read_text();require(sha(code)==doc['program_versions'][name],'Target version changed')
@@ -378,6 +513,10 @@ class Coordinator:
             from .fixtures import adversarial_review
             adversarial=adversarial_review(p,code,suite,checkpoint=lambda:self.checkpoint(doc,persist=False));self.checkpoint(doc)
             result['adversarial']=adversarial
+            if suite['coverage'].get('logic_validation'):
+                logic_summaries.append({'program':name,**suite['coverage']['logic_validation'],
+                    'complete':suite['coverage']['complete'] and not result['differences'] and adversarial['passed'],
+                    'target_matched':not result['differences'],'adversarial_passed':adversarial['passed']})
             write_new(runroot/name/'actual-and-comparison.json',encode(result));self.register(doc,f'synthetic/{run_id}/{name}/actual-and-comparison.json')
             self.checkpoint(doc)
             run['programs'][name]=result
@@ -399,6 +538,12 @@ class Coordinator:
             write_new(root/'target'/run_id/'job-comparison.json',encode(result));self.register(doc,f'target/{run_id}/job-comparison.json')
             if not result['matched']:doc['blockers'].append({'kind':'job_integration_gap','message':result['reason']})
         self.checkpoint(doc)
+        if doc.get('logic_validation_min_records'):
+            unsupported=len(doc['analysis']['blockers'])
+            summary={'minimum_distinct_records_per_logic':doc['logic_validation_min_records'],'programs':logic_summaries,'unsupported_obligations':unsupported,'complete':bool(logic_summaries) and not unsupported and all(s.get('complete') for s in logic_summaries),'basis':'SOURCE_DERIVED_EXPECTED','observed_legacy_parity':False}
+            relative=f'synthetic/{run_id}/logic-validation.json';write_new(output_path(self.root,pid,relative),encode(summary));self.register(doc,relative)
+            doc['logic_validation']={'minimum_distinct_records_per_logic':doc['logic_validation_min_records'],'validated_programs':len(logic_summaries),'unsupported_obligations':unsupported,'complete':summary['complete'],'evidence':relative}
+            if not summary['complete']:doc['blockers'].append({'kind':'logic_validation_gap','message':'Every applicable source logic item requires distinct records and reproducible target evidence; unsupported, unreachable or undersampled obligations remain unverified'})
         doc['runs'].append(run);doc['verification_finished']=True;self.checkpoint(doc)
         doc['knowledge_records']=update_knowledge(self.ledger,doc)
         self.ledger.event(pid,'verification','Local target comparisons complete; source-derived expectations remain distinct from observed mainframe results',{'programs':len(run['programs']),'unresolved':len(doc['blockers'])})
@@ -449,7 +594,9 @@ class Coordinator:
             if bool(doc.get('cancel_requested'))!=generated_cancelled:
                 doc['report_verified']=False;self.checkpoint(doc,'QUEUED_REPORT');raise StageInterrupted()
             doc['report_hashes']=hashes;doc['report_verified']=True
-            self.ledger.complete_report(doc,decode((output/'metrics.json').read_bytes())['metrics'])
+            metrics=decode((output/'metrics.json').read_bytes())['metrics']
+            if metrics.get('estate_inventory_json'):doc['accepted_inventory']=json.loads(metrics['estate_inventory_json'])
+            self.ledger.complete_report(doc,metrics)
 
     def launch_worker(self):
         if self.worker:return

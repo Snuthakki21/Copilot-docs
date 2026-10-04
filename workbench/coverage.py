@@ -9,9 +9,13 @@ import html
 import json
 import re
 import sqlite3
+from collections import Counter
+from xml.etree import ElementTree
+from zipfile import ZipFile
 from io import StringIO
 from pathlib import Path
-from openpyxl import Workbook, load_workbook
+from openpyxl import Workbook
+from openpyxl.cell import WriteOnlyCell
 from .domain import encode, sha, safe_path, atomic_json, require
 
 DISPOSITIONS = ('mapped_verified', 'mapped_unverified', 'blocked',
@@ -22,6 +26,7 @@ COLUMNS = ('source_path', 'source_kind', 'source_hash', 'source_line', 'source_t
            'source_line_hash', 'unit_id', 'source_start', 'source_end', 'disposition',
            'target_file', 'target_version', 'target_start', 'target_end', 'target_mappings',
            'tests', 'reason', 'replacement', 'evidence')
+EXCEL_MAX_ROWS = 1048576
 
 
 def _read(path):
@@ -84,8 +89,11 @@ def _program_evidence(doc, root, base, name, p, global_errors, checkpoint=None):
         expected_path = identity_path/'expected.json'; actual_path = identity_path/'actual-and-comparison.json'
         expected_raw = _read(expected_path); actual_raw = _read(actual_path)
         suite = json.loads(expected_raw)
+        require(suite.get('coverage',{}).get('min_records_per_logic',0)==doc.get('logic_validation_min_records',0),
+                'Frozen per-logic validation record minimum differs from the process contract')
         reproduced = plan_cases(p, doc.get('authorization', {}).get('seed', 21),
-                                doc.get('authorization', {}).get('max_cases_per_program', 256))
+                                doc.get('authorization', {}).get('max_cases_per_program', 256),
+                                suite.get('coverage',{}).get('min_records_per_logic',0))
         require(expected_raw == encode(reproduced), 'Frozen expected evidence changed or cannot be reproduced')
         require(actual_raw == encode(result), 'Stored actual evidence differs from its run record')
         replay = verify_program(p, code, suite, checkpoint=checkpoint)
@@ -165,6 +173,12 @@ def _manifest_integrity(doc,base):
         raw=_read(base/'analysis/mainframe-knowledge.json')
         require(raw==encode(snapshot) and sha(raw)==doc.get('artifact_hashes',{}).get('analysis/mainframe-knowledge.json'),
                 'Frozen mainframe knowledge changed or is missing its recorded baseline')
+    if 'inventory_baseline' in doc:
+        from .inventory import validate_snapshot
+        snapshot=doc['inventory_baseline'];validate_snapshot(snapshot)
+        raw=_read(base/'analysis/inventory-baseline.json')
+        require(raw==encode(snapshot) and sha(raw)==doc.get('artifact_hashes',{}).get('analysis/inventory-baseline.json'),
+                'Frozen inventory baseline changed or is missing its recorded baseline')
 
 
 def _database_integrity(doc,root,base):
@@ -191,6 +205,29 @@ def _database_integrity(doc,root,base):
     finally:connection.close()
 
 
+def _review_integrity(doc,base):
+    """Conversion credit requires the preserved human receipt, not cached answers."""
+    from .review import read_answers
+    if not doc.get('packet_issued') and not doc.get('packet_imported') and not doc.get('answers'):return
+    require(doc.get('packet_issued'),'SME answer evidence exists without the one issued packet')
+    packet=None
+    for name in ('packet.json','sme-checklist.xlsx','sme-checklist.docx','sme-checklist.html'):
+        relative='review/'+name;raw=_read(base/relative)
+        require(sha(raw)==doc.get('artifact_hashes',{}).get(relative),'Frozen SME packet artifact changed or lacks its baseline: '+name)
+        if name=='packet.json':packet=json.loads(raw)
+    require(packet.get('packet_hash')==doc.get('packet_hash') and
+            sha(encode({key:value for key,value in packet.items() if key!='packet_hash'}))==doc.get('packet_hash'),
+            'Frozen SME packet content/hash changed')
+    require(packet.get('process_id')==doc['id'] and packet.get('source_snapshot')==(doc.get('analysis') or {}).get('source_snapshot'),
+            'Frozen SME packet differs from the process/source snapshot')
+    if not doc.get('packet_imported'):
+        require(not doc.get('answers'),'Cached SME answers exist without the accepted human return')
+        return
+    answers=doc.get('answers') or {};raw=_read(base/'input/sme-return.xlsx')
+    require(sha(raw)==answers.get('return_hash'),'Preserved SME return changed')
+    require(read_answers(raw,packet,answers.get('reviewer',''))==answers,'SME answers differ from the preserved human return')
+
+
 def build_coverage(doc, workspace_root, checkpoint=None):
     """Return one accounting row per original physical source line, in file order.
 
@@ -198,10 +235,13 @@ def build_coverage(doc, workspace_root, checkpoint=None):
     completion. Inventory includes files excluded from the selected process.
     """
     root = Path(workspace_root).resolve(); base = safe_path(root, 'processes/'+doc['id'])
-    analysis = doc.get('analysis') or {}; errors = []; sources = {}; source_ok = {}
+    analysis = doc.get('analysis') or {}
+    errors=['Recorded evidence integrity failure: '+str(blocker.get('message','Unresolved immutable evidence failure'))
+            for blocker in doc.get('blockers',[]) if blocker.get('kind')=='evidence_integrity']
+    sources = {}; source_ok = {}
     assets = {a['path']:a for a in analysis.get('assets', [])}
     programs = analysis.get('programs', {})
-    for label,check in [('Manifest',lambda:_manifest_integrity(doc,base)),('Target database',lambda:_database_integrity(doc,root,base))]:
+    for label,check in [('Manifest',lambda:_manifest_integrity(doc,base)),('SME review',lambda:_review_integrity(doc,base)),('Target database',lambda:_database_integrity(doc,root,base))]:
         try:check()
         except Exception as exc:errors.append(label+': '+(str(exc) or type(exc).__name__))
     for path, expected_hash in sorted(doc.get('source_files', {}).items()):
@@ -231,6 +271,21 @@ def build_coverage(doc, workspace_root, checkpoint=None):
     if not job_state['verified']:
         integrity.append('Job integration: '+job_state['reason'])
     by_path = {p['path']:(name,p) for name,p in programs.items()}
+    coverage_by_path = {p['path']:{row['line']:row for row in p.get('coverage',[])} for p in programs.values()}
+    rules_by_path = {p['path']:{rule['id']:rule for rule in p.get('rules',[])} for p in programs.values()}
+    blocker_reasons = {}
+    layout_parents = {}
+    for name,p in programs.items():
+        reasons=blocker_reasons.setdefault(p['path'],{})
+        for blocker in p.get('blockers',[]):
+            for number in blocker.get('lines',[]):reasons.setdefault(number,[]).append(blocker['message'])
+        for field in p.get('fields',{}).values():
+            ref=field.get('source_ref','')
+            if ':' in ref:
+                path,number=ref.rsplit(':',1)
+                if number.isdigit():
+                    parents=layout_parents.setdefault((path,int(number)),{})
+                    parents[name]=p
     referenced = {d['path'] for p in programs.values() for d in p.get('dependencies', [])}
     referenced.update(ref.rsplit(':',1)[0] for p in programs.values() for f in p.get('fields', {}).values() for ref in [f.get('source_ref','')] if ':' in ref)
     rows = []; inventory = []
@@ -264,12 +319,12 @@ def build_coverage(doc, workspace_root, checkpoint=None):
                 disposition = 'non_executable'; reason = 'Blank line or source comment; preserved without executable conversion credit.'
             elif program_entry:
                 name,p = program_entry; state = states[name]
-                coverage = next((c for c in p.get('coverage', []) if c['line'] == line_no), {})
+                coverage = coverage_by_path[path].get(line_no,{})
                 original_disposition = coverage.get('disposition', 'unaccounted')
                 if original_disposition in ('blank','comment','structure','paragraph'):
                     disposition = 'non_executable'; reason = 'Source comment, declaration header or label; no independent runtime behavior.'
                 elif original_disposition == 'modeled':
-                    rid = coverage.get('rule_id'); rule = next((r for r in p['rules'] if r['id'] == rid), None)
+                    rid = coverage.get('rule_id'); rule = rules_by_path[path].get(rid)
                     if rule:
                         start = rule['source_start']; end = rule['source_end']; unit = 'rule:'+path+':'+rid; mapping_key = rid
                 elif original_disposition in ('data_layout','copybook'):
@@ -278,10 +333,10 @@ def build_coverage(doc, workspace_root, checkpoint=None):
                     unit = 'terminal:'+path+':'+str(line_no); mapping_key = 'terminal'
                     replacement = 'GOBACK/STOP RUN maps to the generated Python return adapter with record, trace and zero return code in the supported process boundary.'
                 else:
-                    matching = [b['message'] for b in p.get('blockers', []) if line_no in b.get('lines', [])]
+                    matching = blocker_reasons[path].get(line_no,[])
                     reason = '; '.join(matching) or 'Source statement is unsupported or unaccounted; a semantic adapter is required.'
             elif kind == 'copybook':
-                parents = [(name,p) for name,p in programs.items() if any(f.get('source_ref') == path+':'+str(line_no) for f in p.get('fields', {}).values())]
+                parents = list(layout_parents.get((path,line_no),{}).items())
                 if parents:
                     unit = 'layout:'+path+':'+str(line_no)
                     for name,p in parents:
@@ -333,7 +388,8 @@ def build_coverage(doc, workspace_root, checkpoint=None):
                          'disposition':disposition, 'target_file':target.get('file'), 'target_version':target.get('version'),
                          'target_start':target.get('start'), 'target_end':target.get('end'), 'target_mappings':mappings,
                          'tests':sorted(set(tests)), 'reason':reason, 'replacement':replacement, 'evidence':evidence})
-    counts = {d:sum(r['disposition'] == d for r in rows) for d in DISPOSITIONS}
+    distribution=Counter(row['disposition'] for row in rows)
+    counts = {d:distribution[d] for d in DISPOSITIONS}
     applicable = sum(r['disposition'] not in ('non_executable','out_of_scope') for r in rows)
     verified = sum(r['disposition'] in VERIFIED for r in rows)
     units = {}
@@ -353,6 +409,19 @@ def build_coverage(doc, workspace_root, checkpoint=None):
                'verified_applicable_lines':verified, 'line_verification_percent':round(100*verified/applicable,2) if applicable else None,
                'dispositions':counts, 'semantic_units':{'total':len(units), 'applicable':len(unit_applicable), 'verified':unit_verified, 'dispositions':unit_dispositions,
                'verification_percent':round(100*unit_verified/len(unit_applicable),2) if unit_applicable else None}, 'integrity_errors':integrity}
+    adapter_groups={}
+    adapter_labels={'cobol_program':'COBOL source semantics and control/data flow','copybook':'COPY layouts and native data representation',
+                    'jcl_job':'JCL execution, native I/O and utility adapters','jcl_proc':'JCL procedure expansion and overrides',
+                    'bms_map':'CICS/BMS screen actions, transactions and business UI/API',
+                    'sql':'Db2 database and transaction semantics','scheduler_definition':'CA7 scheduling, calendars and restart',
+                    'utility_control':'Utility control statements and verified side effects'}
+    for row in rows:
+        if row['disposition']!='blocked':continue
+        kind=analysis.get('classifications',{}).get(row['source_path'],{}).get('kind',row['source_kind'])
+        group=adapter_groups.setdefault(kind,{'kind':kind,'label':adapter_labels.get(kind,'Semantic adapter for '+kind),
+                                             'blocked_lines':0,'source_paths':set(),'requires_conversion':True})
+        group['blocked_lines']+=1;group['source_paths'].add(row['source_path'])
+    summary['adapter_groups']=[{**group,'source_paths':sorted(group['source_paths'])} for group in sorted(adapter_groups.values(),key=lambda item:(-item['blocked_lines'],item['kind']))]
     return {'version':1, 'process_id':doc['id'], 'manifest_hash':doc.get('manifest_hash'), 'source_snapshot':analysis.get('source_snapshot'),
             'evidence_basis':'SOURCE_DERIVED_EXPECTED', 'observed_mainframe_parity':False,
             'denominators':{'source_lines':'All frozen exported physical lines, including non-executable and explicitly out-of-scope lines.',
@@ -368,58 +437,124 @@ def _cell(value):
     return "'"+text if text.lstrip().startswith(('=','+','-','@')) else text
 
 
+def _utf16_chunks(text, capacity=30000):
+    """Excel limits UTF-16 code units, including non-BMP source characters."""
+    start=0;units=0
+    for offset,character in enumerate(text):
+        width=2 if ord(character)>0xffff else 1
+        if units+width>capacity:
+            yield text[start:offset];start=offset;units=0
+        units+=width
+    if start<len(text):yield text[start:]
+
+
+class _WorkbookTable:
+    """A write-only table split at Excel's physical row limit, with exact receipts."""
+    def __init__(self, book, title, columns, widths=()):
+        self.book=book;self.title=title;self.columns=list(columns);self.widths=widths
+        self.sheets=[];self.row_counts=[];self.rows=0;self._new_sheet()
+    def _new_sheet(self):
+        require(EXCEL_MAX_ROWS>=2,'Excel sheet limit must leave room for a header and data')
+        title=self.title if not self.sheets else self.title+' '+str(len(self.sheets)+1)
+        sheet=self.book.create_sheet(title)
+        sheet.freeze_panes='A2'
+        for column,width in self.widths:sheet.column_dimensions[column].width=width
+        sheet.append(self.columns);self.sheets.append(sheet);self.row_counts.append(1)
+    def append(self, values, literal_columns=()):
+        if self.row_counts[-1]>=EXCEL_MAX_ROWS:self._new_sheet()
+        sheet=self.sheets[-1];cells=list(values)
+        for column in literal_columns:
+            cell=WriteOnlyCell(sheet,value=cells[column]);cell.data_type='s';cells[column]=cell
+        sheet.append(cells);self.rows+=1;self.row_counts[-1]+=1
+    def next_location(self):
+        if self.row_counts[-1]>=EXCEL_MAX_ROWS:self._new_sheet()
+        return self.sheets[-1].title,self.row_counts[-1]+1
+    def finish(self):
+        from openpyxl.utils import get_column_letter
+        for sheet,count in zip(self.sheets,self.row_counts):
+            sheet.auto_filter.ref='A1:'+get_column_letter(len(self.columns))+str(count)
+
+
+def _inspect_workbook_tables(path, book, tables):
+    """Count actual serialized rows without materializing millions of cells."""
+    expected={sheet.title:count for table in tables for sheet,count in zip(table.sheets,table.row_counts)}
+    with ZipFile(path) as archive:
+        for number,sheet in enumerate(book.worksheets,1):
+            if sheet.title not in expected:continue
+            count=0;container=None
+            with archive.open('xl/worksheets/sheet'+str(number)+'.xml') as source:
+                for event,element in ElementTree.iterparse(source,events=('start','end')):
+                    tag=element.tag.rsplit('}',1)[-1]
+                    if event=='start' and tag=='sheetData':container=element
+                    elif event=='end' and tag=='row':
+                        count+=1
+                        require(int(element.attrib.get('r',count))<=EXCEL_MAX_ROWS,'Coverage worksheet exceeds Excel row limit')
+                        element.clear()
+                        if container is not None:container.remove(element)
+            require(count==expected[sheet.title],'Coverage workbook row count changed: '+sheet.title)
+
+
 def write_coverage(model, report_root):
+    """Stream every output and split worksheets; the canonical JSON loses no text."""
     root = Path(report_root)
     names = ('coverage.json','coverage.csv','coverage.xlsx','coverage.html')
     require(not root.is_symlink() and not any(p.is_symlink() for p in root.parents), 'Unsafe coverage output path')
     require(not any((root/name).exists() or (root/name).is_symlink() for name in names),
             'Coverage evidence already exists; create a new report version')
     root.mkdir(parents=True, exist_ok=True)
-    atomic_json(root/'coverage.json', model)
-    output = StringIO(); writer = csv.writer(output); writer.writerow(COLUMNS)
-    for row in model['rows']: writer.writerow([_cell(row.get(c)) for c in COLUMNS])
-    (root/'coverage.csv').write_text(output.getvalue(), encoding='utf-8')
-    book = Workbook(); summary = book.active; summary.title = 'Summary'; summary.append(['Measure','Value'])
-    chunks=book.create_sheet('Text chunks');chunks.append(['Table','Row','Column','Chunk sequence','Text','Original SHA256','Encoding'])
+    json_path=root/'coverage.json'
+    with json_path.open('w',encoding='utf-8',newline='') as output:
+        for chunk in json.JSONEncoder(ensure_ascii=False,sort_keys=True,indent=2,allow_nan=False).iterencode(model):output.write(chunk)
+        output.write('\n')
+    csv_count=0
+    with (root/'coverage.csv').open('w',encoding='utf-8',newline='') as output:
+        writer=csv.writer(output);writer.writerow(COLUMNS)
+        for row in model['rows']:
+            writer.writerow([_cell(row.get(c)) for c in COLUMNS]);csv_count+=1
+    require(csv_count==len(model['rows']),'Coverage CSV row count changed')
+    book=Workbook(write_only=True)
+    summary=_WorkbookTable(book,'Summary',('Measure','Value'))
+    chunks=_WorkbookTable(book,'Text chunks',('Table','Row','Column','Chunk sequence','Text','Original SHA256','Encoding'))
     def workbook_cell(value,table,row_number,column):
         raw=json.dumps(value,ensure_ascii=False,sort_keys=True) if isinstance(value,(list,dict)) else '' if value is None else str(value)
         invalid=bool(re.search(r'[\x00-\x08\x0b\x0c\x0e-\x1f]',raw))
         preserved=json.dumps(raw,ensure_ascii=True) if invalid else raw
-        if len(_cell(value))>32767 or invalid:
-            for sequence,offset in enumerate(range(0,len(preserved),30000),1):
-                chunks.append([table,row_number,column,sequence,preserved[offset:offset+30000],sha(raw),'json_string' if invalid else 'literal'])
-                chunks.cell(chunks.max_row,5).data_type='s'
+        if len(_cell(value).encode('utf-16-le'))//2>32767 or invalid:
+            digest=sha(raw)
+            for sequence,chunk in enumerate(_utf16_chunks(preserved),1):
+                chunks.append([table,row_number,column,sequence,chunk,digest,'json_string' if invalid else 'literal'],literal_columns=(4,))
             return '[Full text in Text chunks: '+table+' row '+str(row_number)+' column '+column+']'
         return _cell(value)
-    for key,value in model['summary'].items(): summary.append([key,workbook_cell(value,'Summary',summary.max_row+1,key)])
-    sheet = book.create_sheet('Source lines'); sheet.append(list(COLUMNS))
-    for row in model['rows']: sheet.append([workbook_cell(row.get(c),'Source lines',sheet.max_row+1,c) for c in COLUMNS])
-    sheet.freeze_panes = 'A2'; sheet.auto_filter.ref = sheet.dimensions
-    for column in ('A','E','P','Q','R','S'): sheet.column_dimensions[column].width = 45
-    inventory = book.create_sheet('Files'); file_columns = ('path','kind','source_hash','physical_lines','selected','scope_reason','integrity_verified','source_text')
-    inventory.append(list(file_columns))
-    for file in model['files']: inventory.append([workbook_cell(file.get(c),'Files',inventory.max_row+1,c) for c in file_columns])
-    denominators = book.create_sheet('Denominators'); denominators.append(['Measure','Meaning'])
-    for key,value in model['denominators'].items(): denominators.append([key,value])
-    denominators.append(['Spreadsheet source text','Formula-leading CSV/XLSX values receive a protective apostrophe prefix. Oversized or XML-incompatible workbook values are preserved reversibly in Text chunks, with original hashes and literal/JSON encoding. JSON remains the exact canonical source text.'])
-    book.save(root/'coverage.xlsx'); book.close()
-    esc = lambda v: html.escape(json.dumps(v,ensure_ascii=False,sort_keys=True) if isinstance(v,(list,dict)) else '' if v is None else str(v), quote=True)
-    body = ['<!doctype html><html lang="en"><meta charset="utf-8"><title>Source accountability</title>',
-            '<style>body{font:14px system-ui;margin:24px}table{border-collapse:collapse}td,th{border:1px solid #ccc;padding:6px;vertical-align:top}pre{white-space:pre-wrap}th{background:#edf2f7}</style>',
-            '<h1>Source accountability</h1><p>Bounded source-derived verification. Observed mainframe parity is not established.</p>',
-            '<pre>'+html.escape(json.dumps(model['summary'],indent=2))+'</pre>', '<h2>Denominators</h2><ul>']
-    body.extend('<li>'+esc(k)+': '+esc(v)+'</li>' for k,v in model['denominators'].items())
-    body.append('</ul><h2>Frozen file inventory</h2><table><tr>')
-    body.extend('<th>'+esc(c)+'</th>' for c in file_columns[:-1]); body.append('</tr>')
-    for file in model['files']: body.append('<tr>'+''.join('<td>'+esc(file.get(c))+'</td>' for c in file_columns[:-1])+'</tr>')
-    body.append('</table><h2>Every source line, in original file order</h2><table><tr>')
-    body.extend('<th>'+esc(c)+'</th>' for c in COLUMNS); body.append('</tr>')
-    for row in model['rows']: body.append('<tr>'+''.join('<td><pre>'+esc(row.get(c))+'</pre></td>' for c in COLUMNS)+'</tr>')
-    body.append('</table></html>'); (root/'coverage.html').write_text(''.join(body), encoding='utf-8')
-    # Check meaningful row preservation and workbook reopenability before reports can certify output.
-    require(json.loads((root/'coverage.json').read_text()) == model, 'Coverage JSON round-trip failed')
-    require(len(list(csv.DictReader(StringIO((root/'coverage.csv').read_text())))) == len(model['rows']), 'Coverage CSV row count changed')
-    reopened = load_workbook(root/'coverage.xlsx', read_only=True)
-    try: require(reopened['Source lines'].max_row == len(model['rows'])+1, 'Coverage workbook row count changed')
-    finally: reopened.close()
+    def add(table, values, column_names):
+        name,number=table.next_location()
+        table.append([workbook_cell(value,name,number,column) for value,column in zip(values,column_names)])
+    for key,value in model['summary'].items():add(summary,[key,value],['Measure',key])
+    lines=_WorkbookTable(book,'Source lines',COLUMNS,[(column,45) for column in ('A','E','P','Q','R','S')])
+    for row in model['rows']:add(lines,[row.get(c) for c in COLUMNS],COLUMNS)
+    file_columns=('path','kind','source_hash','physical_lines','selected','scope_reason','integrity_verified','source_text','classification')
+    inventory=_WorkbookTable(book,'Files',file_columns)
+    for file in model['files']:add(inventory,[file.get(c) for c in file_columns],file_columns)
+    denominators=_WorkbookTable(book,'Denominators',('Measure','Meaning'))
+    for key,value in model['denominators'].items():add(denominators,[key,value],['Measure',key])
+    add(denominators,['Spreadsheet source text','Formula-leading CSV/XLSX values receive a protective apostrophe prefix. Oversized or XML-incompatible workbook values are preserved reversibly in Text chunks with original hashes and literal/JSON encoding. UTF-16 cell limits and worksheet row limits are enforced; split-sheet names identify the exact source cell. JSON remains the exact canonical source text.'],['Measure','Meaning'])
+    tables=[summary,chunks,lines,inventory,denominators]
+    for table in tables:table.finish()
+    book.save(root/'coverage.xlsx');book.close()
+    esc=lambda value:html.escape(json.dumps(value,ensure_ascii=False,sort_keys=True) if isinstance(value,(list,dict)) else '' if value is None else str(value),quote=True)
+    html_count=0
+    with (root/'coverage.html').open('w',encoding='utf-8',newline='') as output:
+        output.write('<!doctype html><html lang="en"><meta charset="utf-8"><title>Source accountability</title><style>body{font:14px system-ui;margin:24px}table{border-collapse:collapse}td,th{border:1px solid #ccc;padding:6px;vertical-align:top}pre{white-space:pre-wrap}th{background:#edf2f7}</style><h1>Source accountability</h1><p>Bounded source-derived verification. Observed mainframe parity is not established.</p><pre>'+html.escape(json.dumps(model['summary'],indent=2))+'</pre><h2>Denominators</h2><ul>')
+        for key,value in model['denominators'].items():output.write('<li>'+esc(key)+': '+esc(value)+'</li>')
+        output.write('</ul><h2>Frozen file inventory</h2><table><tr>'+''.join('<th>'+esc(c)+'</th>' for c in file_columns if c!='source_text')+'</tr>')
+        for file in model['files']:output.write('<tr>'+''.join('<td>'+esc(file.get(c))+'</td>' for c in file_columns if c!='source_text')+'</tr>')
+        output.write('</table><h2>Every source line, in original file order</h2><table><tr>'+''.join('<th>'+esc(c)+'</th>' for c in COLUMNS)+'</tr>')
+        for row in model['rows']:
+            output.write('<tr>'+''.join('<td><pre>'+esc(row.get(c))+'</pre></td>' for c in COLUMNS)+'</tr>');html_count+=1
+        output.write('</table></html>')
+    require(html_count==len(model['rows']) and lines.rows==len(model['rows']) and inventory.rows==len(model['files']),'Coverage output row count changed')
+    _inspect_workbook_tables(root/'coverage.xlsx',book,tables)
+    # Small reports also reproduce the entire canonical document; large reports
+    # are inspected while writing and by actual workbook XML row counts.
+    if json_path.stat().st_size<=32*1024*1024:
+        require(json.loads(json_path.read_text(encoding='utf-8'))==model,'Coverage JSON round-trip failed')
     return [root/name for name in names]

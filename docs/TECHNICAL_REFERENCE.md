@@ -9,10 +9,26 @@ operating, implementation and extension reference. Update it in place.
 
 After initial setup: provide the process manifest and complete Endeavor export,
 click Start, return the one authentic SME checklist, then receive one primary
-executive report. Local analysis, supported Python conversion, deterministic
+executive report. Copilot Chat operates through the local workspace MCP bridge;
+no LLM endpoint/token is required. Local analysis, supported Python conversion, deterministic
 synthetic generation, comparison, adversarial mutation checks, knowledge updates
 and the six-slide management PowerPoint run automatically. Blockers stay visible.
-The implementation is a bounded POC, not an arbitrary COBOL/CICS/SQL converter.
+The Python/SQLite target is non-production. Full COBOL/CICS/SQL semantics require
+source-supported adapters; recognizing syntax or submitting a plan gives no credit.
+
+Copilot-mode intake maps job-led transitive object lineage first. Missing,
+ambiguous, dynamic or unsupported bindings stop at `WAITING_DISCOVERY`, before
+conversion or SME questions. The retained export is indexed in full; unrelated
+members remain explicitly outside the selected closure. Configured typed Zowe
+and Db2 reads resolve local misses; fetched source is frozen through a
+ledger-pinned recovery journal before conversion. Closure COMPLETE describes
+the bounded static graph, not all runtime paths or the entire estate.
+`WAITING_COPILOT` exposes content-addressed frozen analysis/task evidence.
+Copilot can implement/test adapters then call `workbench_refresh_analysis`
+before the one SME packet; prior evidence remains preserved. Only the current
+hash-matching return is accepted. The service never invokes Copilot Chat itself
+or fabricates a model result. Deterministic/historical mode preserves earlier
+contracts; the new UI/Start prompt selects Copilot mode.
 
 Read-only Zowe/Db2 discovery does not require prelisting schemas or tables.
 No source-system writes, mainframe execution or synthetic uploads are permitted.
@@ -22,7 +38,7 @@ not observed mainframe results. No claim of perfect software is supported.
 ## Guided setup and credentials
 
 The UI asks six questions: where the export is, whether the manifest is ready,
-whether Zowe and Db2 are needed/configured, whether optional LLM suggestions are
+whether Zowe and Db2 are needed/configured, whether Copilot Chat is
 wanted, and whether a reviewer is available. Answers are saved locally as typed
 choices. The guide performs zero network/model calls. Configuration, successful
 connection, supported conversion and verified business acceptance are separate.
@@ -38,7 +54,7 @@ connection, supported conversion and verified business acceptance are separate.
 | Background articles | `WORKSPACE/knowledge/inbox/context.md`, up to 16 KB | Devin/application notes. Treated as unverified evidence, never executable instructions or approval. |
 | Zowe, when used | Authenticated CLI profile; `WB_ZOWE_PROFILE` | Account-visible read-only catalog/source operations. Profile presence is not successful authentication or complete discovery. |
 | Db2, when used | Authenticated typed MCP URL/token; IBM ODBC driver and `pyodbc` for the bundled gateway | Schema/table descriptions without a prior schema allowlist. Discovery and sample access are distinct; no arbitrary SQL or automatic row sampling. |
-| LLM, when used | Approved endpoint, model and token; explicit source-egress setting | Optional bounded suggestions. It does not enlarge the deterministic converter's supported syntax. |
+| Copilot Chat | Normal VS Code Copilot access; copy `examples/mcp.json` to `.vscode/mcp.json`; running local UI | Frozen-task/source tools and structured analysis return. No LLM endpoint/token; normal host trust/tool consent applies. Tokens/billing Unknown without a receipt. |
 | Actual SME return | One issued checklist, completed by the real reviewer; import once with attribution | Confirms or corrects interpretations. Unanswered/No/corrected items remain unresolved; no second questionnaire is generated. |
 
 Private environment variables are set in your shell before launch. `.env.example`
@@ -53,10 +69,27 @@ The UI never asks you to paste credentials into a form or source file.
 
 | Connection | Variables / prerequisite | Actual implemented behavior |
 |---|---|---|
-| Zowe | Authenticated read-only CLI profile, `WB_ZOWE_PROFILE` | Typed dataset/member lists and source-member reads; Start records bounded catalogue discovery. Conversion uses the supplied local snapshot. |
-| Db2 MCP | `WB_DB2_MCP_URL`, `WB_DB2_MCP_TOKEN` | Typed `db2_list_schemas`, `db2_list_tables`, `db2_describe_table`, `db2_sample_rows`. Supported protocol revisions 2025-06-18 / 2025-03-26; cursors and partial results retained. No arbitrary SQL or automatic business-row sampling. |
-| Optional local Db2 gateway | Provision IBM ODBC driver and `pyodbc`; private `WB_DB2_ODBC_CONNECTION` | `tools/db2_mcp_server.py` exposes the typed read-only operations. Drivers and live credentials are not bundled. |
-| Optional LLM | Approved OpenAI-compatible chat-completions `WB_LLM_URL`, `WB_LLM_MODEL`, `WB_LLM_TOKEN`; `WB_ALLOW_SOURCE_EGRESS=true` | At most 16 KB bounded source/background excerpts; validated suggestions enter the same SME packet. Usage counters come from the provider. No arbitrary generated-code execution. Unset provider variables and restart for deterministic-only operation. |
+| Zowe | `WB_ZOWE_PROFILE`, optional paired `WB_ZOWE_ZOSMF_PROFILE`; actual service access | `tools/setup_zowe.py --interactive` prepares secure declarations; exact config/schema import is supported. Typed bounded lists/reads resolve missing sources. TPX aliases cannot substitute for z/OSMF/API host/profile mappings. |
+| Db2 MCP | `WB_DB2_MCP_URL`, `WB_DB2_MCP_TOKEN` | Schema/table/describe tools plus bounded sampling and explicit `db2_read_table_rows`. Supported revisions 2025-06-18 / 2025-03-26. Every account-visible schema/table is eligible; no allowlist or caller-supplied SQL. Automatic lineage does not export business rows. |
+| Local Db2 gateway | IBM ODBC/pyodbc; `WB_DB2_CONFIG`; private `WB_DB2_USER`/`WB_DB2_PASSWORD` | `tools/setup_db2.py` prepares server/location/database/host/port, SSL true, fixed `certificates/DB2-CA.cert` and max_rows up to 500,000. Replace the invalid placeholder. Explicit row exports default to 1,000, pages at most 1,000, short-lived cursors and byte/time limits. Reaching a cap is PARTIAL. Legacy external `WB_DB2_ODBC_CONNECTION` retains externally managed TLS responsibility. |
+| Copilot Chat | Workspace stdio MCP configuration from `examples/mcp.json` and existing local UI origin | Uses normal workspace chat/agent tools. Bridge never creates a second Coordinator, runs arbitrary shell or asks for a model endpoint. Legacy explicit opt-in provider remains available, with its own endpoint/source-egress configuration. |
+
+Zowe's “no secure properties found” means the selected configuration has no
+secure declarations. The guided helper adds field names `user`/`password` to
+the base profile's `secure` array. Run the emitted `zowe config secure` command
+from that workspace (or its matching user-config variant), enter credentials
+only at local prompts, then perform an actual permitted read. Existing defaults
+and unrelated profiles are preserved. Import never searches home configurations.
+
+Application routing facts: the supplied TPX session `TS0 DB2 2` is a source/Db2
+hint, `SCHEDD` is the development CA7 hint, CICS is in UAT with the exact location
+unconfirmed, and `SYSPL` is a JCL search hint. These facts do not establish an
+API endpoint, dataset library, permission, CICS map or CA7 export facility.
+Provide actual Zowe-visible libraries/services or original exported definitions.
+WEDLX receives available files from Tran Repository/source systems; configure
+exact local/mounted folder bindings in `knowledge/input-locations.json` using
+`examples/input-locations.json`. Only an observed exact file binding resolves
+availability. Layout, cutoff/completeness and business readiness remain unknown.
 
 ### Runtime and recovery
 
@@ -75,12 +108,23 @@ The executable agent workflow and continuation commands are in
 
 ### Explicit resource limits
 
-200 source files; 512,000 UTF-8 bytes/file; 8 MiB and 100,000 physical lines in
-all source files; 2,000 SME checklist items; 256 synthetic cases/program for an
-operational process; 192 atomic condition comparisons; JSON depth 256.
+10,000 source files; 16 MiB UTF-8 bytes/file; 512 MiB and 2 million physical lines
+combined; 40,000 source traversal entries; 100,000 workspace entries. Browser
+source uploads are separately 32 MiB combined, HTTP/JSON documents 128 MiB,
+workbooks 8 MiB. These are protective ceilings, not memory/stress certification;
+per-line analysis/model expansion can reach the state or memory bound earlier.
+The 822-file export and 700,570-byte source regression retain every input byte.
+No dependent file is removed to fit the old POC limit.
+SME v2 compacts technical blockers by program/type while preserving all raw gaps
+in Context/coverage; business rules remain individual. At most 2,000 mandatory
+review items; no silent truncation. Historical packet v1 is replayed unchanged.
+Copilot-mode fixtures default to 4,096 cases/program, support budgets to 10,000,
+and require 10 distinct source-predicate input states per supported logic item
+(configurable 10–20). Legacy fixtures retain 256. There are 192 atomic condition
+comparisons and JSON depth 256. Coverage XLSX splits sheets at Excel's row limit.
 Limits reject excess rather than silently truncating it. Required witnesses
 that cannot fit the fixture budget remain coverage gaps. Do not omit dependent
-files to fit a budget. The separate 200,000-scenario engineering campaign does
+files to fit a budget. The separate 200,000/600,000-scenario engineering campaigns do
 not change these process limits.
 
 ## Implemented behavior and remaining adapters
@@ -91,13 +135,13 @@ not change these process limits.
 | Layouts | Unsigned PIC 9 and fixed-width PIC X, simple named 01/05 declarations, LINKAGE groups named once each in PROCEDURE USING, group-correlated fixtures | JSON record transport; not EBCDIC, packed binary, COMP-3, VSAM or native datasets. Standalone level-77 items, FILLER, WORKING-STORAGE/FILE lifetime and initialization require adapters and remain blocked. |
 | Conversion | Audited generated Python for fully supported programs, immutable shared versions | Source-order rule behavior is preserved; syntactic line-for-line Python correspondence is not claimed. Unsupported programs receive no full executable translation. No code is silently retired as mainframe-only. |
 | Jobs | Named method per job, ordered steps and RC comparisons; actual record-adapter job comparison | Same field-name sets required between programs. One integration baseline, not exhaustive path testing. DSN reads/writes, external scheduler, procedure expansion and restart semantics require adapters. |
-| LLM | Explicit opt-in excerpts, bounded structured analysis, suggestions in the SME packet, reported token usage | No autonomous arbitrary generated-code execution, auto-repair, unrestricted tools or generic agent-loop implementation. |
-| Synthetic data | Deterministic seed, layout bounds, threshold neighbors, matching/mismatching attributes, grouped records, bounded interactions | Maximum 256 cases per program; branch/obligation coverage for the modeled IR only; budget-exhausted mandatory witnesses are explicit gaps. No claim of every possible record/path/condition combination. |
+| Copilot | Frozen tasks, bounded source excerpts, MCP return and adapter reassessment before SME issue | IDE host initiates model work. Returned plans/context cannot clear semantic blockers; actual adapters and tests are required. |
+| Synthetic data | Source-derived boundaries, invalid layouts, sequential effects, distinct logic states and linked-group match/mismatch witnesses | New contracts require 10–20 distinct valid states per supported logic item, with explicit budget/domain/reachability gaps. Native missing/duplicate/empty file/table behavior needs its own adapter. No exhaustive or observed legacy claim. |
 | Oracle | Independent source IR interpreter freezes expected results before generated Python execution | Both depend on the parser; parser errors remain a shared risk. No observed mainframe oracle or mainframe execution. |
 | Verification | Full output/trace/RC comparisons, independent source-order job interpretation, per-rule decision/boundary/effect mutation, denied capability checks; new target contracts include directly tested input guards | Historical targets used the separate JSON adapter. No native mainframe malformed-record semantics are claimed. Unit suite and mutation checks do not substitute for actual legacy execution evidence. |
 | SME | One frozen packet / one valid return per process, immutable question identity/Context/Metadata, Yes/No/Not sure, corrections retained | Corrections requiring new semantics remain blockers. A Yes on an unsupported-item description does not make its conversion supported. |
 | Knowledge | Standard mainframe catalog, editable application/vendor JSON catalog, content-based classification, per-process immutable snapshot, one background Markdown and confirmed-fact JSON/index pair | Recognition never grants conversion support. No semantic cross-process auto-approval or autonomous interpretation of corrected prose. |
-| Connectors | Typed read-only Zowe CLI and authenticated, negotiated Db2 MCP/gateway; bounded paginated catalogue discovery | Credentials, IBM drivers and source exports must be supplied. No preapproved schema list required. Automatic multi-location dependency resolution is not yet implemented. |
+| Connectors | Local-first typed transitive discovery, Zowe source/metadata reads, Db2 catalog lookup and explicit row exports | Account/service visibility and parser limits remain explicit. No schema allowlist; missing libraries/dynamic bindings/TPX-only facilities need exports or actual service mappings. |
 | UI | Local React intake/prompt/file workflow, real stage events, rule lineage, source coverage filters, review import, Pause/Resume/Cancel and downloads | No target business CICS screen modernization in this subset. Workbench screens and control APIs are not counted as business replacements. |
 | Reporting | One primary executive HTML report, six editable PPT slides, metric XLSX/CSV/JSON/history, complete source coverage JSON/CSV/XLSX/HTML, unique/membership counts, LOC and blockers | CICS/VSAM/interfaces unknown until evidenced. Db2 metric is distinct references in supplied SQL, not a confirmed estate table count. Physical/code LOC convention differs by source kind and is not equivalent complexity. |
 | Inspection | PPT reopened, editable table count and canvas bounds checked, hashes recorded | Six sample slides rendered and visually inspected through Artifact Tool. Native PowerPoint/LibreOffice, browser rendering and Windows launch remain unverified. |
@@ -108,7 +152,17 @@ Source assets deduplicate by kind, name and SHA256. Process memberships count re
 
 A known rule is credited only when its SME answer is Yes, its whole supported program has no source blockers or output differences, and both decision outcomes have witnesses. `known_rule_verification_percent` divides those rules by all **extracted known rules**. It is never called total modernization percentage. Unsupported lines, unknown rules, uncertainty, omitted behavior and coverage gaps are shown separately and prevent `COMPLETED`. Non-executable and explicit out-of-scope lines are separated from applicable lines. Every supplied file/line retains its disposition/reason. Mainframe-specific credit requires a concrete verified replacement; native DD/dataset/scheduler behavior is not inferred away.
 
-`COMPLETED` means the supported source-derived POC profile finished its local tests and report checks without recorded blockers. It does not mean all possible legacy inputs were proved equivalent. `COMPLETED_WITH_BLOCKERS` records finished processing with unresolved gaps. Report failure leaves `REPORTING_FAILED`; resume retains the single-SME quota.
+`COMPLETED` means the stated source-derived target profile finished its tests and report gates without recorded blockers. It does not prove all possible legacy inputs equivalent. `COMPLETED_WITH_BLOCKERS` records finished reporting with unresolved work. Waiting for discovery/Copilot are prerequisites, not conversion status. Report failure leaves `REPORTING_FAILED`; Resume preserves the SME quota.
+
+The frozen declared estate is 166 batch COBOL, 599 JCL jobs, 174 PROCs, 245
+copybooks/layouts, 80 CICS screens, 108 Db2 tables, 450 CA7 schedules and 4 MQ
+interfaces. These sum to **1,826**; the declared **1,829** has **3 unreconciled**.
+The baseline remains user-reported/unverified in `knowledge/inventory-baseline.json`
+(template `examples/inventory-baseline.json`). Executive report, PowerPoint and
+workbook separate baseline, observed/unknown scope, verified converted versions,
+unique logical assets, memberships and cumulative progress. Shared assets are
+deduplicated. CICS screens and transactions are distinct; workbench controls/UI
+are never counted as business replacements.
 
 ## Adversarial review
 
@@ -184,7 +238,7 @@ Markdown file preserved under `input/sources`.
 | Discovery pagination ends at a limit or data changes mid-scan | Cursors, counts and partial/complete account-visible evidence | Preserve the cursor and timestamps. Current discovery is not a transactional estate snapshot or automatic dependency fetcher. |
 | Source/target/catalog/SME/report bytes changed | Recorded immutable hashes, source/analysis replay, return identity and artifact checks | Restore an intact backup or start a separately identified process from the original evidence. Never recalculate hashes to certify modified history. |
 | Stale knowledge or hostile instructions in source/notes | Data-only bounded catalog; frozen provenance; no executable catalog fields or automatic approval | Review evidence for this source/version. Prior confirmations are interpretations, not permission to execute commands or approve changed rules. |
-| Too few or unrealistic synthetic records | Source-derived mandatory branches/boundaries/matches, deterministic interactions and witness counts | Record missing obligations explicitly. Four sample rows cannot certify 85 rules; 256 cases is a budget, not exhaustive coverage. |
+| Too few or unrealistic synthetic records | Source-derived mandatory branches/boundaries/matches, deterministic interactions and witness counts | Record missing obligations explicitly. Four sample rows cannot certify 85 rules. Copilot mode uses a 4,096-case budget and requires 10–20 distinct valid states per supported logic; unreachable or unsupported obligations stay gaps. A budget is not exhaustive coverage. |
 | Expected results copied from target | Expectations frozen from independent source IR before target execution | Shared parser remains a common-mode risk; SME/source review and mutation checks help but cannot establish observed legacy parity. |
 | Invalid data accepted by exported Python | New target contract embeds input validation; direct target rejection is tested | Distinguish malformed input rejection from business-rule failure. JSON validation is not proof of native malformed EBCDIC-record behavior. |
 | Good tests miss a rule, overwritten effect or incorrect boundary | Per-rule mutation checks and explicit surviving/missing witness gaps | Treat masked or surviving mutations as unresolved; do not invent passing evidence. |
@@ -255,7 +309,7 @@ Development checks in the locked environment:
 python -m unittest discover -s tests
 PYTHONPATH=. python tools/review500.py
 PYTHONPATH=. python tools/review_expanded.py
-PYTHONPATH=. python tools/scenario_campaign.py --seed 20261003
+PYTHONPATH=. python tools/scenario_campaign.py --seed 20261003 --total-scenarios 600000
 python -m workbench.layout --workspace .
 python tools/check_handoff.py
 ```
@@ -265,8 +319,10 @@ Install frontend development dependencies with `npm ci` in `frontend/`, then
 `node frontend/test-ui.mjs` for the component/behavior checks. Engineering tests use fictional fixtures only and clear
 all source/provider environment settings. The real HTTP tests bind loopback.
 The 1,000 named checks comprise R001–R500 and 500 new R501–R1000 checks. They are
-not 1,000 independent reviewers. The generated campaign executes 200,000 unique
-program/input scenarios with independently coded family expectations, records
+not 1,000 independent reviewers. The generated campaign explicitly selects 600,000 unique
+program/input scenarios (200 programs × 3,000 records); the historical default
+200,000 recipe remains reproducible. It compares executed Python and reference
+behavior against independently coded family expectations, records
 its seed, implementation hashes and replay indices, and uses zero LLM calls.
 Finite combinations do not establish exhaustive legacy parity.
 

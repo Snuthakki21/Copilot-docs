@@ -29,7 +29,7 @@ def manifest_integrity(coordinator, doc, supplied=None):
                 'Process ID already exists with a different manifest hash; use its original manifest or a new process ID')
 
 
-def start_process(coordinator, manifest_path):
+def start_process(coordinator, manifest_path, assistant_mode=None):
     path = Path(manifest_path)
     require(path.is_file() and not path.is_symlink() and not any(p.is_symlink() for p in path.absolute().parents),
             'Manifest must be a regular Markdown file with no symlink parents')
@@ -43,7 +43,7 @@ def start_process(coordinator, manifest_path):
         manifest_integrity(coordinator, existing, raw)
         coordinator.sources(existing)  # Never credit a modified input snapshot.
         return coordinator.start(existing['id']) if existing['status'] == 'READY' else existing
-    doc = coordinator.create(text)
+    doc = coordinator.create(text,assistant_mode=assistant_mode)
     return coordinator.start(doc['id'])
 
 
@@ -72,6 +72,7 @@ def wait_for_process(coordinator, pid, timeout=120, watch=False, reviewer=''):
     while True:
         doc = coordinator.ledger.get(pid)
         if doc['status'] in TERMINAL or doc['status'] in STOPPED: return doc, False
+        if doc['status'] in ('WAITING_DISCOVERY','WAITING_COPILOT'):return doc,False
         if doc['status'] == 'WAITING_SME':
             inbox = output_path(coordinator.root, pid, INBOX)
             if inbox.exists():
@@ -162,6 +163,8 @@ def summary(coordinator, doc, timed_out=False):
     if primary:result['reports']=[result['primary_report']]
     if doc['status'] == 'WAITING_SME':
         result['message'] = 'Deliver the issued checklist for the one SME review. Preserve Context/questions. Place the actual returned workbook in sme_return_inbox and resume with reviewer attribution. Never generate SME answers.'
+    elif doc['status']=='WAITING_DISCOVERY':result['message']='Read-only object discovery is incomplete. Inspect lineage gaps, supply original missing exports or local connector configuration, then resume. Conversion and the SME packet have not started.'
+    elif doc['status']=='WAITING_COPILOT':result['message']='Open GitHub Copilot Chat in VS Code with examples/mcp.json configured. Request the frozen task using workbench_next_task, inspect sources, implement required adapters with tests, then submit the structured analysis. No LLM endpoint is required.'
     elif timed_out: result['message'] = 'Bounded wait expired; evidence is preserved. Inspect status and run resume to continue.'
     elif doc['status'] in STOPPED: result['message'] = 'Stage stopped; inspect blockers and event ledger, correct the cause, then explicitly resume.'
     return result
@@ -173,7 +176,9 @@ def parser():
     for name in ('run', 'start', 'resume', 'status', 'import', 'report', 'bundle'):
         c = commands.add_parser(name)
         c.add_argument('--workspace', '--workspace-path', '--root', required=True, help='Workspace containing the read-only Endeavor export')
-        if name in ('run', 'start'): c.add_argument('--manifest', '--manifest-path', required=True)
+        if name in ('run', 'start'):
+            c.add_argument('--manifest', '--manifest-path', required=True)
+            c.add_argument('--assistant',choices=['copilot_chat','deterministic','opt_in'],default=None,help='Copilot Chat uses the local MCP bridge; no model endpoint/token')
         else: c.add_argument('process_id')
         if name in ('run', 'start', 'resume', 'import', 'report'):
             c.add_argument('--timeout', type=float, default=120, help='Bounded worker/watch wait, at most 3600 seconds')
@@ -192,10 +197,10 @@ def main(argv=None):
             require(0 < args.timeout <= 3600, 'Timeout must be greater than zero and at most 3600 seconds')
             require(not args.watch or bool(args.reviewer.strip()), '--watch requires --reviewer attribution')
         coordinator = Coordinator(args.workspace)
-        if args.command in ('run', 'start'): doc = start_process(coordinator, args.manifest)
+        if args.command in ('run', 'start'): doc = start_process(coordinator, args.manifest,args.assistant)
         else: doc = coordinator.ledger.get(args.process_id)
         if args.command == 'import': doc = import_return(coordinator, doc['id'], args.file, args.reviewer)
-        if args.command == 'resume' and doc['status'] in STOPPED:
+        if args.command == 'resume' and doc['status'] in STOPPED|{'WAITING_DISCOVERY'}:
             doc = coordinator.control(doc['id'], 'resume')
         if args.command == 'resume':
             require(doc['status'] != 'READY', 'Process is READY; use start with its original manifest to record Start authorization')

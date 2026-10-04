@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 from workbench.domain import ValidationError
 from workbench.instance import InstanceLock
+from workbench.limits import MAX_SOURCE_FILES, MAX_SOURCE_FILE_BYTES, MAX_UI_SOURCE_BYTES
 
 ROOT=Path(__file__).resolve().parents[1]
 
@@ -67,19 +68,19 @@ class IntegrationReviews(unittest.TestCase):
         self.assertEqual(result,original)
 
     def test_r486_excess_file_count_rejects_before_reading(self):
-        """More than 200 selections must be rejected before file reads begin."""
-        result=self.node("let reads=0;try{await readSourceFiles(Array.from({length:201},(_,i)=>({name:String(i),size:0,arrayBuffer:async()=>{reads++;return new ArrayBuffer(0)}})))}catch(e){console.log(JSON.stringify({error:e.message,reads}))}")
-        self.assertEqual(result['reads'],0);self.assertIn('200',result['error'])
+        """More than 10,000 selections must be rejected before file reads begin."""
+        result=self.node("let reads=0;try{await readSourceFiles(Array.from({length:"+str(MAX_SOURCE_FILES+1)+"},(_,i)=>({name:String(i),size:0,arrayBuffer:async()=>{reads++;return new ArrayBuffer(0)}})))}catch(e){console.log(JSON.stringify({error:e.message,reads}))}")
+        self.assertEqual(result['reads'],0);self.assertIn('10,000',result['error'])
 
     def test_r487_aggregate_byte_limit_is_checked_before_reads(self):
-        """An oversized selected export must fail without reading every member."""
-        result=self.node("let reads=0;try{await readSourceFiles(Array.from({length:18},(_,i)=>({name:String(i),size:512000,arrayBuffer:async()=>{reads++;return new ArrayBuffer(0)}})))}catch(e){console.log(JSON.stringify({error:e.message,reads}))}")
-        self.assertEqual(result['reads'],0);self.assertIn('8 MiB',result['error'])
+        """An export above the 32 MiB browser budget must fail before member reads."""
+        result=self.node("let reads=0;try{await readSourceFiles(Array.from({length:3},(_,i)=>({name:String(i),size:"+str(MAX_UI_SOURCE_BYTES//3+1)+",arrayBuffer:async()=>{reads++;return new ArrayBuffer(0)}})))}catch(e){console.log(JSON.stringify({error:e.message,reads}))}")
+        self.assertEqual(result['reads'],0);self.assertIn('32 MiB',result['error'])
 
     def test_r488_oversized_member_is_not_materialized(self):
-        """One oversized member must fail before allocating its byte buffer."""
-        result=self.node("let reads=0;try{await readSourceFiles([{name:'BIG',size:512001,arrayBuffer:async()=>{reads++;return new ArrayBuffer(0)}}])}catch(e){console.log(JSON.stringify({error:e.message,reads}))}")
-        self.assertEqual(result['reads'],0);self.assertIn('512000',result['error'])
+        """One member above 16 MiB must fail before allocating its byte buffer."""
+        result=self.node("let reads=0;try{await readSourceFiles([{name:'BIG',size:"+str(MAX_SOURCE_FILE_BYTES+1)+",arrayBuffer:async()=>{reads++;return new ArrayBuffer(0)}}])}catch(e){console.log(JSON.stringify({error:e.message,reads}))}")
+        self.assertEqual(result['reads'],0);self.assertIn(str(MAX_SOURCE_FILE_BYTES),result['error'])
 
     def test_r489_later_member_failure_does_not_return_partial_export(self):
         """A failure after a valid first member must reject the whole selection."""

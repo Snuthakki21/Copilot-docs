@@ -31,8 +31,16 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status,400)
         status,_=await self.request('/api/intake','POST',{'manifest':'x'},headers)
         self.assertEqual(status,400)
-        status,_=await self.request('/api/intake','POST',{'prompt':'a'*(12*1024*1024+1)},headers)
-        self.assertEqual(status,413)
+        from unittest.mock import patch
+        # Exercise the actual streaming body gate without allocating 128 MiB.
+        with patch('workbench.api.MAX_HTTP_BODY_BYTES',1024):
+            limited=create_app(Path(self.tmp.name)/'body-limit');prior=self.app;self.app=limited
+            try:
+                _,limited_raw=await self.request('/api/state');limited_token=json.loads(limited_raw)['token']
+                limited_headers=[(b'origin',b'http://127.0.0.1:8765'),(b'x-workbench-token',limited_token.encode())]
+                status,_=await self.request('/api/intake','POST',{'prompt':'a'*1025},limited_headers)
+                self.assertEqual(status,413)
+            finally:self.app=prior;limited.state.coordinator.close()
     async def test_real_demo_enters_single_review_stage_and_static_is_local(self):
         status,raw=await self.request('/api/state');self.assertEqual(status,200);token=json.loads(raw)['token']
         status,raw=await self.request('/api/demo','POST',headers=[(b'origin',b'http://127.0.0.1:8765'),(b'x-workbench-token',token.encode())]);self.assertEqual(status,200)

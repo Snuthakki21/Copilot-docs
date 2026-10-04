@@ -6,6 +6,7 @@ import shutil
 import threading
 
 from .domain import ValidationError, atomic_json, decode, require, safe_path
+from .limits import MAX_SOURCE_BYTES, MAX_SOURCE_FILE_BYTES, MAX_SOURCE_FILES, MAX_SOURCE_LINES, MAX_UI_SOURCE_BYTES
 
 MAX_SETUP_BYTES = 4096
 _LOCK = threading.RLock()
@@ -18,8 +19,8 @@ _QUESTIONS = (
      (('not_needed', 'Not needed'), ('configured', 'Configured locally'), ('needs_setup', 'Help configuring Zowe'))),
     ('db2', 'Read-only Db2', 'Do you need read-only Db2 catalog discovery for this process?',
      (('not_needed', 'Not needed'), ('configured', 'Configured locally'), ('needs_setup', 'Help configuring Db2'))),
-    ('llm', 'Optional model suggestions', 'Use deterministic analysis, or explicitly opt in to approved source excerpts?',
-     (('disabled', 'Deterministic analysis'), ('opt_in', 'Optional approved LLM suggestions'))),
+    ('llm', 'Analysis assistant', 'Use GitHub Copilot Chat after lineage discovery, or choose the existing deterministic/provider modes?',
+     (('copilot_chat', 'GitHub Copilot Chat (Recommended)'), ('disabled', 'Deterministic analysis'), ('opt_in', 'Legacy approved provider suggestions'))),
     ('reviewer', 'Human reviewer', 'Is a real human reviewer available for the single SME workbook?',
      (('available', 'Reviewer available'), ('needs_setup', 'Arrange a reviewer'))),
 )
@@ -67,7 +68,7 @@ def _configuration(root, env):
     zowe = db2 = llm = False
     if env.get('WB_ZOWE_PROFILE'):
         try:
-            ZoweReader(env['WB_ZOWE_PROFILE'])
+            ZoweReader(env['WB_ZOWE_PROFILE'], env.get('WB_ZOWE_ZOSMF_PROFILE'))
             hint = env.get('WB_DATASET_HINT', '*')
             require(isinstance(hint, str) and re.fullmatch(r'[A-Za-z0-9@$#.*()_-]{1,150}', hint)
                     and not hint.startswith('-'), 'Invalid dataset hint')
@@ -89,12 +90,13 @@ def _configuration(root, env):
 
 def _view(root, answers, env):
     config = _configuration(root, env)
+    config['assistant_mode'] = 'deterministic' if answers['llm'] == 'disabled' else answers['llm'] or 'copilot_chat'
     actions = {
-        'source':'Choose a complete local Endeavor export or upload the complete UTF-8 text source set during intake. Preserve the original source; never execute it.',
+        'source':f'Choose the complete local Endeavor export (up to {MAX_SOURCE_FILES:,} files, {MAX_SOURCE_FILE_BYTES // (1024 * 1024)} MiB per file, {MAX_SOURCE_BYTES // (1024 * 1024)} MiB combined and {MAX_SOURCE_LINES:,} physical lines) or upload up to {MAX_UI_SOURCE_BYTES // (1024 * 1024)} MiB in the browser. Keep larger exports in local Endeavor; preserve every original file and never execute the source.',
         'manifest':'Download the intake template, supply the real process ID and ordered jobs/steps, then mark the manifest ready. Setup does not invent process facts.',
-        'zowe':'If needed, install the approved Zowe CLI, authenticate an existing read-only profile locally, and set WB_ZOWE_PROFILE before launch. Keep credentials outside this questionnaire.',
-        'db2':'If needed, configure the read-only Db2 MCP gateway and set WB_DB2_MCP_URL with private authentication in the launch environment. Setup never submits SQL or validates live access.',
-        'llm':'Choose deterministic analysis unless optional suggestions are needed. For authorized excerpts, configure WB_LLM_URL and WB_LLM_MODEL and explicitly set WB_ALLOW_SOURCE_EGRESS=true in the launch environment, then restart. Never paste tokens here.',
+        'zowe':'Install the approved Zowe CLI. From the workspace, run tools/setup_zowe.py with your actual z/OSMF host, port and project profile aliases, then run zowe config secure interactively. Enter user/password only at local Zowe prompts. Set WB_ZOWE_PROFILE and the paired WB_ZOWE_ZOSMF_PROFILE before launch. Preserve explicitly selected project config/schema files; never read home profiles here. WEDLX is application location context, with availability and input readiness still Unknown.',
+        'db2':'Prepare the read-only Db2 gateway with tools/setup_db2.py. Replace placeholders with actual nonsecret host, port and database values. Put the approved CA certificate at certificates/DB2-CA.cert and retain TLS validation. Supply authentication privately in the launch environment, then set WB_DB2_MCP_URL for the gateway. Configuration and a certificate file do not prove live access; setup never submits SQL.',
+        'llm':'GitHub Copilot Chat needs no model endpoint or API token in this workbench. Complete selected-job lineage discovery first, then use the local MCP bridge in VS Code to retrieve the frozen task and source excerpts and submit source-grounded suggestions. Model identity and token usage remain Unknown. The one SME packet follows the validated handoff; actual human answers and deterministic tests remain required.',
         'reviewer':'Arrange a real human reviewer for the one SME workbook. Availability is preparation only; the actual returned workbook and reviewer attribution remain required.',
     }
     complete = {
@@ -102,11 +104,13 @@ def _view(root, answers, env):
         'manifest':answers['manifest'] == 'ready',
         'zowe':answers['zowe'] == 'not_needed' and not env.get('WB_ZOWE_PROFILE') or answers['zowe'] == 'configured' and config['zowe_configured'],
         'db2':answers['db2'] == 'not_needed' and not env.get('WB_DB2_MCP_URL') or answers['db2'] == 'configured' and config['db2_configured'],
-        'llm':answers['llm'] == 'disabled' and not env.get('WB_LLM_URL') or answers['llm'] == 'opt_in' and config['llm_configured'] and config['source_egress_approved'],
+        'llm':answers['llm'] == 'copilot_chat' or answers['llm'] == 'disabled' and not env.get('WB_LLM_URL') or answers['llm'] == 'opt_in' and config['llm_configured'] and config['source_egress_approved'],
         'reviewer':answers['reviewer'] == 'available',
     }
     if answers['llm'] == 'disabled' and env.get('WB_LLM_URL'):
         actions['llm'] = 'Remove WB_LLM_URL from the launch environment and restart for deterministic analysis. Saving this answer does not change the running provider configuration or authorize source transfer.'
+    elif answers['llm'] == 'opt_in':
+        actions['llm'] = 'For the legacy provider, configure WB_LLM_URL and WB_LLM_MODEL and explicitly set WB_ALLOW_SOURCE_EGRESS=true in the launch environment, then restart. Use only approved source excerpts and keep tokens outside this questionnaire.'
     for key, variable in (('zowe', 'WB_ZOWE_PROFILE'), ('db2', 'WB_DB2_MCP_URL')):
         if answers[key] == 'not_needed' and env.get(variable):
             actions[key] = 'Remove ' + variable + ' from the launch environment and restart to omit this optional read-only discovery. Saving this answer does not change runtime configuration.'
